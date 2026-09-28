@@ -179,7 +179,28 @@ def cmd_rekey(args, settings: U.Settings) -> int:
         json.dump(key_doc, fh, indent=2)
         fh.write("\n")
     _print(f"key.enc re-wrapped under the new password: {path}")
-    _print("Publish it with `report sync` (the content blobs are unchanged).")
+
+    U.git(settings.repo_dir, ["add", U.KEY_ENC_NAME])
+    if U.git(settings.repo_dir, ["diff", "--cached", "--quiet"], check=False).returncode == 0:
+        _print("key.enc unchanged; nothing to publish")
+        return 0
+    U.git(
+        settings.repo_dir,
+        [*U.COMMIT_IDENTITY, "commit", "-m", "rekey: re-wrap key.enc under new password"],
+    )
+    if getattr(args, "no_push", False):
+        _print("committed key.enc (not pushed; --no-push)")
+        return 0
+    if not U.remote_configured(settings):
+        _print("committed key.enc (no remote configured; push manually)")
+        return 0
+    try:
+        U.git(settings.repo_dir, ["push", settings.remote, settings.branch])
+    except U.SyrError as exc:
+        _print(f"committed key.enc but push failed: {exc}")
+        _print("push manually, or run `report sync` once the remote is reachable")
+        return 1
+    _print("key.enc committed and pushed; the browser now accepts the new password")
     return 0
 
 
@@ -228,6 +249,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_unlock_mk)
 
     p = sub.add_parser("rekey", parents=[common], help="re-wrap the master key under a new password")
+    p.add_argument("--no-push", action="store_true")
     p.set_defaults(func=cmd_rekey)
 
     return parser
