@@ -67,7 +67,10 @@ def cmd_init(args, settings: U.Settings) -> int:
     with open(os.path.join(settings.repo_dir, "robots.txt"), "w", encoding="utf-8") as fh:
         fh.write("User-agent: *\nDisallow: /\n")
 
-    U.save_config(settings)
+    # Explicit --repo-dir/--master-dir target an ad-hoc vault; do not clobber the
+    # user's global config (cron relies on it pointing at the real master dir).
+    if getattr(args, "repo_dir", None) is None and getattr(args, "master_dir", None) is None:
+        U.save_config(settings)
 
     _print(f"repo_dir   {settings.repo_dir}")
     _print(f"master_dir {settings.master_dir}")
