@@ -51,6 +51,7 @@
     kdfMeta: el("kdf-meta"),
     lockBtn: el("lock-btn"),
     themeBtn: el("theme-btn"),
+    topbar: document.querySelector(".topbar"),
     query: el("q"),
     listMeta: el("list-meta"),
     reportList: el("report-list"),
@@ -667,6 +668,7 @@
     nodes.gate.hidden = name !== "gate";
     nodes.list.hidden = name !== "list";
     nodes.report.hidden = name !== "report";
+    document.documentElement.classList.toggle("viewing-report", name === "report");
     if (name !== "report") setImmerse(false);
   }
 
@@ -918,6 +920,14 @@
     nodes.listBannerRetry.addEventListener("click", retryManifest);
 
     window.addEventListener("hashchange", applyRoute);
+
+    let lastScrollY = window.scrollY || 0;
+    window.addEventListener("scroll", () => {
+      const y = window.scrollY || 0;
+      if (y > lastScrollY + 6 && y > 48) nodes.topbar.classList.add("is-hidden");
+      else if (y < lastScrollY - 6) nodes.topbar.classList.remove("is-hidden");
+      lastScrollY = y;
+    }, { passive: true });
     // No window "message" listener exists on purpose: the sandbox has an opaque
     // origin, so any future listener must check event.origin === "null" (SPEC §4.5).
   }
