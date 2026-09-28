@@ -860,11 +860,17 @@ def sync(settings: Settings, mk: bytes, *, dry_run: bool = False, no_push: bool 
             reset_hard(settings, tip)
 
         ensure_blobs(settings, mk, reports)
-        save_manifest(settings, mk, reports, now)
-
+        # Idempotency: only rewrite manifest.enc when the logical content changed;
+        # a fresh IV would otherwise dirty the tree (and commit) on every run (SPEC §6).
+        try:
+            prev = index_reports(read_local_manifest(settings, mk))
+        except SyrError:
+            prev = None
+        if prev != reports:
+            save_manifest(settings, mk, reports, now)
         changed = commit_all(settings, f"sync: {len(reports)} reports @ {now}")
         pushed = False
-        if not no_push and remote_configured(settings):
+        if changed and not no_push and remote_configured(settings):
             git(settings.repo_dir, ["push", settings.remote, settings.branch])
             pushed = True
         # Baseline records the committed local reality so re-syncs are idempotent.
