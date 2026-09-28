@@ -189,6 +189,7 @@ robots.txt      # Disallow: /
 - **回滚/重放**：GCM 只防篡改，不防「整份旧 manifest + 旧 blob」回滚，无新鲜度锚。CK 随 rev 旋转 + AAD 绑定 rev 只解决同一 id 的版本回放。
 - `mk.key` 与 env `UZR_MK` 使机器**绕过密码**（密码仅保护 `key.enc`）。
 - 移动端 64MiB Argon2id 可能 OOM（低端机解锁失败）。
+- `sync` 在远端领先时执行 `reset --hard`：会丢弃**未推送的本地提交**（密文可由 `master_dir` 重建；对 shell/文档等非派生文件的改动请先 push）。被丢弃的提交仍可从 `git reflog` 恢复。
 
 ## 11. 变更日志
 
