@@ -467,11 +467,13 @@
       .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
   }
 
-  function metaLine(entry) {
+  function metaLine(entry, withSha = true) {
     const bits = [String(entry.kind || "").toUpperCase(), `r${entry.rev}`];
     if (Number.isFinite(entry.size)) bits.push(formatSize(entry.size));
     if (entry.updatedAt) bits.push(formatDate(entry.updatedAt));
-    if (typeof entry.sha256 === "string" && entry.sha256) bits.push(`sha ${entry.sha256.slice(0, 12)}`);
+    if (withSha && typeof entry.sha256 === "string" && entry.sha256) {
+      bits.push(`sha ${entry.sha256.slice(0, 12)}`);
+    }
     return bits.filter(Boolean).join(" · ");
   }
 
@@ -503,7 +505,7 @@
 
       const sub = document.createElement("span");
       sub.className = "row-sub";
-      sub.textContent = metaLine(entry);
+      sub.textContent = metaLine(entry, false);
 
       main.append(title, sub);
 
@@ -595,7 +597,8 @@
 
   function showReportHead(entry) {
     nodes.reportTitle.textContent = entry && entry.title ? String(entry.title) : "报告";
-    nodes.reportMeta.textContent = entry ? metaLine(entry) : "";
+    const narrow = window.matchMedia && window.matchMedia("(max-width: 40rem)").matches;
+    nodes.reportMeta.textContent = entry ? metaLine(entry, !narrow) : "";
   }
 
   function showReportError(message, entry) {

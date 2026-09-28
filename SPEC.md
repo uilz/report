@@ -195,7 +195,7 @@ robots.txt      # Disallow: /
 
 ## 11. 变更日志
 
-- **v1.1.2**（SPA 修复）：放宽 CSP 以放行报告自带的 `cdn.jsdelivr.net` KaTeX/字体/内联脚本（`srcdoc` 继承父 CSP）；亮暗主题切换 + 持久化；缓存主密钥自动进入的瞬态容错；报告沉浸式放大/缩小；**修复报告空白**——复用且曾隐藏的 iframe 会丢弃后续 `srcdoc` 导航，改为每次新建 iframe 挂载；顶栏下滑收起/上滑出现；报告视图铺满到底并移除页脚与内容框；标签页重新获得焦点/可见时自动重取清单（新报告无需手动刷新）。
+- **v1.1.2**（SPA 修复）：放宽 CSP 以放行报告自带的 `cdn.jsdelivr.net` KaTeX/字体/内联脚本（`srcdoc` 继承父 CSP）；亮暗主题切换 + 持久化；缓存主密钥自动进入的瞬态容错；报告沉浸式放大/缩小；**修复报告空白**——复用且曾隐藏的 iframe 会丢弃后续 `srcdoc` 导航，改为每次新建 iframe 挂载；顶栏下滑收起/上滑出现；报告视图铺满到底并移除页脚与内容框；标签页重新获得焦点/可见时自动重取清单（新报告无需手动刷新）；移动端：安全区内边距、输入 16px 防 iOS 缩放、放大按钮窄屏图标化、窄屏隐藏 sha、标题单行省略。
 - **v1.1.1**（实现落地）：`rekey` 命令（信封重加密）；`sync` 仅在逻辑内容变化时重写 `manifest.enc`、仅在 `changed` 时 push（幂等，防 cron 空提交）；CSP 增补 `'wasm-unsafe-eval'`（Argon2 WASM 必需）；主仓 `/md` 退役并加 `404.html` 跳转至 `/report/`。
 - **v1.1**：`id` 改 32 hex；blob 名含 rev；CK 随 rev 旋转 + AAD 绑定；SPA 校验 sha256；引入本地基线状态；同步改 fetch + 逻辑合并（弃 git merge manifest）；墓碑 bump rev；`--dry-run` 不动工作树；密码 NFC；Argon2 显式参数；CSP/沙箱/DOMPurify 顺序冻结；PBKDF2 分支字段补全；锁移 `~/.cache`；补残余风险。
 - v1.0：初版。
