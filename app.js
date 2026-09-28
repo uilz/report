@@ -764,6 +764,18 @@
     });
   }
 
+  async function refreshManifest() {
+    if (!state.unlocked || !state.mk || document.hidden) return;
+    try {
+      const manifest = await loadManifest(state.mk);
+      state.manifest = manifest;
+      state.reports = manifest.reports.filter((entry) => entry && typeof entry === "object");
+      renderList();
+    } catch {
+      return;
+    }
+  }
+
   async function enterVault(opts) {
     if (manifestBusy) return false;
     manifestBusy = true;
@@ -928,6 +940,10 @@
       else if (y < lastScrollY - 6) nodes.topbar.classList.remove("is-hidden");
       lastScrollY = y;
     }, { passive: true });
+
+    const refresh = () => void refreshManifest();
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
     // No window "message" listener exists on purpose: the sandbox has an opaque
     // origin, so any future listener must check event.origin === "null" (SPEC §4.5).
   }
