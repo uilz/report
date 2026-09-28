@@ -102,7 +102,7 @@ robots.txt      # Disallow: /
    - `kind==="html"`：原文注入 iframe（仍走沙箱）。
    - KaTeX 关闭 `trust`，不用 `\href`（除非明确需要）。
 5. **沙箱（硬性）**：`<iframe sandbox="allow-scripts allow-popups" srcdoc="...">`，**永不**加 `allow-same-origin` / `allow-popups-to-escape-sandbox`；报告 HTML **只**经 `srcdoc` 属性注入，绝不写入父文档。SPA 若有 `message` 监听，必须校验 `event.origin === "null"`。
-6. **CSP**：`index.html` 加严格 CSP：`default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'`。
+6. **CSP**：`index.html` 加严格 CSP：`default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'`。`wasm-unsafe-eval` 是 Argon2id（WebAssembly）在 Chromium 下运行的最小必需授权，缺它则解锁不可用。
 7. **路由**：hash 路由 `#/<id>`；启动解析 hash 直达。
 8. **锁定**：清除 `localStorage["uilz.report.mk"]` 并回密码门。
 9. **元信息**：`<meta name="robots" content="noindex,nofollow">`；移动端响应式。
@@ -132,6 +132,7 @@ robots.txt      # Disallow: /
 | `pull` | 仅拉取解密远端 → 落地 `master_dir` **并更新基线**（不重加密、不推） |
 | `unlock-mk --out <path>` | 导出 base64 MK（交互确认） |
 | `status` | 列出本地/远端/基线差异 |
+| `rekey` | 用新密码重新包裹 MK（信封重加密，内容 blob 不变）；随后 `sync` 发布新 `key.enc` |
 
 - MK 获取优先级：`--mk-file` → env `UZR_MK` → `~/.config/uilz-report/mk.key` → 交互 getpass（仅 `init` 需要密码）。
 
@@ -152,7 +153,7 @@ robots.txt      # Disallow: /
    - **本地删除**（`B` 有、`master_dir` 缺、且远端未改）→ 墓碑 `deleted:true`，`rev=max+1`，`updatedAt=now`。
    - **仅远端新增**（B 与 L 都无、R 有）→ 采纳远端并落地。
 5. **中止保护**：任何一步（fetch/解密/落地）失败 → **立即中止，绝不写墓碑**。仅对「基线中存在」的 id 才判定删除。
-6. 重加密所有本地变更 → `blobs/<id>-<rev>.enc`；写 `manifest.enc`。
+6. 重加密所有本地变更 → `blobs/<id>-<rev>.enc`；**仅当逻辑内容变化时才重写 `manifest.enc`**（否则每次同步的新 IV 都会弄脏工作树、产生空提交）。
 7. `git add -A`；有变更则 `commit`；`push`（除 `--no-push`）。
 8. 更新 `.report-state.json`（记录本次 R∪L 结果与各 rev/sha）。
 9. 释放锁。
@@ -191,5 +192,6 @@ robots.txt      # Disallow: /
 
 ## 11. 变更日志
 
+- **v1.1.1**（实现落地）：`rekey` 命令（信封重加密）；`sync` 仅在逻辑内容变化时重写 `manifest.enc`、仅在 `changed` 时 push（幂等，防 cron 空提交）；CSP 增补 `'wasm-unsafe-eval'`（Argon2 WASM 必需）；主仓 `/md` 退役并加 `404.html` 跳转至 `/report/`。
 - **v1.1**：`id` 改 32 hex；blob 名含 rev；CK 随 rev 旋转 + AAD 绑定；SPA 校验 sha256；引入本地基线状态；同步改 fetch + 逻辑合并（弃 git merge manifest）；墓碑 bump rev；`--dry-run` 不动工作树；密码 NFC；Argon2 显式参数；CSP/沙箱/DOMPurify 顺序冻结；PBKDF2 分支字段补全；锁移 `~/.cache`；补残余风险。
 - v1.0：初版。
