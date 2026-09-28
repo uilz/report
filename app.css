@@ -2,36 +2,43 @@
    uilz/report — SPA shell styles
    Design system: graphite vault + brass accent, system type stacks only
    (the app must run with zero CDN, so no webfonts by design).
-   Tokens are declared once in :root; every rule below resolves to a token.
+   Tokens live in :root (light default); [data-theme="dark"] overrides the same
+   custom properties. The prefers-color-scheme block is only a pre-JS / no-JS
+   fallback: it applies while no explicit [data-theme] is set, so an explicit
+   user choice always wins over the OS.
    ========================================================================== */
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 
-  /* palette */
-  --bg:           #0a0c0f;
-  --bg-soft:      #0d1014;
-  --surface:      #11151a;
-  --surface-2:    #161b21;
-  --surface-3:    #1c222a;
-  --line:         #232b35;
-  --line-strong:  #35414e;
-  --ink:          #e8edf3;
-  --ink-dim:      #a7b2c0;
-  --ink-faint:    #6d7987;
-  --brass:        #d9a05b;
-  --brass-bright: #eebd7d;
-  --brass-ink:    #241706;
-  --brass-08:     rgba(217, 160, 91, .08);
-  --brass-18:     rgba(217, 160, 91, .18);
-  --danger:       #ff8078;
-  --danger-12:    rgba(255, 128, 120, .12);
-  --ok:           #62d6a0;
-  --focus:        #8ec5ff;
-  --frame-bg:     #0c1014;
-  --scrim:        rgba(6, 8, 10, .72);
-  --bg-scrim:     rgba(10, 12, 15, .82);
-  --sweep:        rgba(255, 255, 255, .05);
+  /* palette — warm ivory + burnt brass */
+  --bg:           #f7f5f1;
+  --bg-soft:      #fbfaf7;
+  --surface:      #ffffff;
+  --surface-2:    #f4f1ea;
+  --surface-3:    #ebe6dc;
+  --line:         #e3ded2;
+  --line-strong:  #c9c2b2;
+  --ink:          #211c15;
+  --ink-dim:      #5a5446;
+  --ink-faint:    #6e6757;
+  --brass:        #8a591d;
+  --brass-bright: #9d6624;
+  --brass-ink:    #fff8ec;
+  --brass-08:     rgba(138, 89, 29, .08);
+  --brass-18:     rgba(138, 89, 29, .18);
+  --danger:       #b3261e;
+  --danger-12:    rgba(179, 38, 30, .09);
+  --danger-line:  rgba(179, 38, 30, .32);
+  --ok:           #1e7a4d;
+  --focus:        #2f6fd0;
+  --frame-bg:     #ffffff;
+  --scrim:        rgba(33, 28, 21, .38);
+  --bg-scrim:     rgba(247, 245, 241, .85);
+  --sweep:        rgba(33, 28, 21, .05);
+  --atmos-b:      rgba(30, 122, 77, .06);
+  --atmos-dot:    rgba(33, 28, 21, .04);
+  --spinner-track: rgba(255, 248, 236, .4);
 
   /* type — offline-safe stacks (Latin + CJK) */
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
@@ -65,14 +72,86 @@
   --r-md: 0.625rem;
   --r-lg: 0.875rem;
   --r-full: 999px;
-  --shadow-card: inset 0 1px 0 rgba(255, 255, 255, .035), 0 20px 45px -28px rgba(0, 0, 0, .95);
-  --ring: 0 0 0 3px rgba(142, 197, 255, .28);
+  --shadow-card: 0 1px 2px rgba(33, 28, 21, .06), 0 20px 45px -30px rgba(33, 28, 21, .35);
+  --ring: 0 0 0 3px rgba(47, 111, 208, .22);
 
   /* motion */
   --ease: cubic-bezier(.2, .7, .25, 1);
   --t-fast: 120ms;
   --t-med: 240ms;
   --topbar-h: 3.5rem;
+}
+
+/* Dark palette — explicit choice (theme toggle / stored preference). */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg:           #0a0c0f;
+  --bg-soft:      #0d1014;
+  --surface:      #11151a;
+  --surface-2:    #161b21;
+  --surface-3:    #1c222a;
+  --line:         #232b35;
+  --line-strong:  #35414e;
+  --ink:          #e8edf3;
+  --ink-dim:      #a7b2c0;
+  --ink-faint:    #6d7987;
+  --brass:        #d9a05b;
+  --brass-bright: #eebd7d;
+  --brass-ink:    #241706;
+  --brass-08:     rgba(217, 160, 91, .08);
+  --brass-18:     rgba(217, 160, 91, .18);
+  --danger:       #ff8078;
+  --danger-12:    rgba(255, 128, 120, .12);
+  --danger-line:  rgba(255, 128, 120, .35);
+  --ok:           #62d6a0;
+  --focus:        #8ec5ff;
+  --frame-bg:     #0c1014;
+  --scrim:        rgba(6, 8, 10, .72);
+  --bg-scrim:     rgba(10, 12, 15, .82);
+  --sweep:        rgba(255, 255, 255, .05);
+  --atmos-b:      rgba(98, 214, 160, .05);
+  --atmos-dot:    rgba(255, 255, 255, .022);
+  --spinner-track: rgba(36, 23, 6, .28);
+  --shadow-card: inset 0 1px 0 rgba(255, 255, 255, .035), 0 20px 45px -28px rgba(0, 0, 0, .95);
+  --ring: 0 0 0 3px rgba(142, 197, 255, .28);
+}
+
+/* OS dark fallback — only until an explicit [data-theme] is present. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+
+    --bg:           #0a0c0f;
+    --bg-soft:      #0d1014;
+    --surface:      #11151a;
+    --surface-2:    #161b21;
+    --surface-3:    #1c222a;
+    --line:         #232b35;
+    --line-strong:  #35414e;
+    --ink:          #e8edf3;
+    --ink-dim:      #a7b2c0;
+    --ink-faint:    #6d7987;
+    --brass:        #d9a05b;
+    --brass-bright: #eebd7d;
+    --brass-ink:    #241706;
+    --brass-08:     rgba(217, 160, 91, .08);
+    --brass-18:     rgba(217, 160, 91, .18);
+    --danger:       #ff8078;
+    --danger-12:    rgba(255, 128, 120, .12);
+    --danger-line:  rgba(255, 128, 120, .35);
+    --ok:           #62d6a0;
+    --focus:        #8ec5ff;
+    --frame-bg:     #0c1014;
+    --scrim:        rgba(6, 8, 10, .72);
+    --bg-scrim:     rgba(10, 12, 15, .82);
+    --sweep:        rgba(255, 255, 255, .05);
+    --atmos-b:      rgba(98, 214, 160, .05);
+    --atmos-dot:    rgba(255, 255, 255, .022);
+    --spinner-track: rgba(36, 23, 6, .28);
+    --shadow-card: inset 0 1px 0 rgba(255, 255, 255, .035), 0 20px 45px -28px rgba(0, 0, 0, .95);
+    --ring: 0 0 0 3px rgba(142, 197, 255, .28);
+  }
 }
 
 /* ---------------------------------------------------------------- reset */
@@ -117,8 +196,8 @@ button, input { font: inherit; color: inherit; }
   pointer-events: none;
   background:
     radial-gradient(62rem 30rem at 88% -12%, var(--brass-08), transparent 62%),
-    radial-gradient(52rem 26rem at -12% 112%, rgba(98, 214, 160, .05), transparent 60%),
-    radial-gradient(rgba(255, 255, 255, .022) 1px, transparent 1px);
+    radial-gradient(52rem 26rem at -12% 112%, var(--atmos-b), transparent 60%),
+    radial-gradient(var(--atmos-dot) 1px, transparent 1px);
   background-size: auto, auto, 1.5rem 1.5rem;
 }
 
@@ -160,7 +239,26 @@ button, input { font: inherit; color: inherit; }
 
 .brand-sep { color: var(--ink-faint); padding: 0 0.05em; font-weight: 400; }
 
+.topbar-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
 .lock-btn { flex: none; }
+
+.theme-btn { width: 2.375rem; padding: 0; }
+
+.theme-btn .ico-sun { display: none; }
+.theme-btn .ico-moon { display: block; }
+[data-theme="dark"] .theme-btn .ico-sun { display: block; }
+[data-theme="dark"] .theme-btn .ico-moon { display: none; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .theme-btn .ico-sun { display: block; }
+  :root:not([data-theme]) .theme-btn .ico-moon { display: none; }
+}
 
 /* ---------------------------------------------------------------- stage */
 
@@ -224,7 +322,7 @@ button, input { font: inherit; color: inherit; }
   display: none;
   width: 1rem;
   height: 1rem;
-  border: 2px solid rgba(36, 23, 6, .28);
+  border: 2px solid var(--spinner-track);
   border-top-color: var(--brass-ink);
   border-radius: var(--r-full);
   animation: spin 0.8s linear infinite;
@@ -314,7 +412,7 @@ button, input { font: inherit; color: inherit; }
 
 .alert {
   padding: var(--s3);
-  border: 1px solid rgba(255, 128, 120, .35);
+  border: 1px solid var(--danger-line);
   border-radius: var(--r-md);
   background: var(--danger-12);
   color: var(--danger);
@@ -486,6 +584,41 @@ button, input { font: inherit; color: inherit; }
   animation: sweep 1.4s var(--ease) infinite;
 }
 
+/* list banner — cached-key notice / transient load failure */
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin-bottom: var(--s4);
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  font-size: var(--text-sm);
+  color: var(--ink-dim);
+}
+
+.banner[data-tone="info"] { border-color: var(--brass-18); background: var(--brass-08); }
+
+.banner[data-tone="error"] {
+  border-color: var(--danger-line);
+  background: var(--danger-12);
+  color: var(--danger);
+}
+
+.banner-ico { width: 1.0625rem; height: 1.0625rem; flex: none; }
+
+.banner .ico-banner-error { display: none; }
+.banner[data-tone="info"] .banner-ico { color: var(--brass); }
+.banner[data-tone="error"] .banner-ico { color: var(--danger); }
+.banner[data-tone="error"] .ico-banner-info { display: none; }
+.banner[data-tone="error"] .ico-banner-error { display: inline-block; }
+
+.banner-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+.banner-btn { min-height: 1.9rem; padding: 0 var(--s3); font-size: var(--text-xs); }
+
 /* ---------------------------------------------------------------- report */
 
 .report-head {
@@ -550,7 +683,7 @@ button, input { font: inherit; color: inherit; }
   color: var(--ink-dim);
 }
 
-.report-error { background: var(--surface); border-color: rgba(255, 128, 120, .3); }
+.report-error { background: var(--surface); border-color: var(--danger-line); }
 
 .report-error-title { font-weight: 600; color: var(--danger); }
 
@@ -637,4 +770,56 @@ button, input { font: inherit; color: inherit; }
   .report-head { gap: var(--s3); }
 
   .btn { min-height: 2.75rem; } /* comfortable touch targets */
+
+  .theme-btn { width: 2.75rem; }
+}
+
+/* ------------------------------------------------- immersive reading + zoom */
+.zoom-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 2.25rem;
+  padding: 0 var(--s3);
+  font-size: var(--text-sm);
+  border-radius: var(--r-md);
+  color: var(--ink-dim);
+}
+
+.zoom-btn svg { width: 1.05rem; height: 1.05rem; }
+.report-head .zoom-btn { flex: none; margin-left: auto; }
+
+.zoom-collapse {
+  display: none;
+  position: absolute;
+  top: var(--s3);
+  right: var(--s3);
+  z-index: 6;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-card);
+}
+
+html.immerse .zoom-collapse { display: inline-flex; }
+
+html.immerse .topbar,
+html.immerse .foot,
+html.immerse .report-head { display: none; }
+
+html.immerse body { overflow: hidden; }
+html.immerse .stage { max-width: none; padding: 0; }
+
+html.immerse .report-stage {
+  position: fixed;
+  inset: 0;
+  min-height: 0;
+}
+
+html.immerse .report-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }

@@ -17,6 +17,7 @@
   /* ------------------------------------------------------------- constants */
 
   const LS_MK = "uilz.report.mk";
+  const LS_THEME = "uilz.report.theme";
 
   const AAD_KEY = enc("uilz-report/v1/key");
   const INFO_MANIFEST = enc("uilz-report/v1/manifest");
@@ -49,11 +50,15 @@
     unlockLabel: el("unlock-label"),
     kdfMeta: el("kdf-meta"),
     lockBtn: el("lock-btn"),
+    themeBtn: el("theme-btn"),
     query: el("q"),
     listMeta: el("list-meta"),
     reportList: el("report-list"),
     listEmpty: el("list-empty"),
     listSkeleton: el("list-skeleton"),
+    listBanner: el("list-banner"),
+    listBannerText: el("list-banner-text"),
+    listBannerRetry: el("list-banner-retry"),
     reportTitle: el("report-title"),
     reportMeta: el("report-meta"),
     frame: el("report-frame"),
@@ -61,6 +66,8 @@
     reportError: el("report-error"),
     reportErrorMsg: el("report-error-msg"),
     reportRetry: el("report-retry"),
+    reportExpand: el("report-expand"),
+    reportCollapse: el("report-collapse"),
   };
 
   /* ----------------------------------------------------------------- state */
@@ -73,8 +80,11 @@
     query: "",
     activeId: null,
     keyDocPromise: null,
+    enteredViaCache: false,
   };
   let openToken = 0;
+  let manifestBusy = false;
+  let autoRetryLeft = 1;
 
   /* ---------------------------------------------------------------- errors */
 
@@ -89,6 +99,11 @@
   const fail = (code, message) => {
     throw new VaultError(code, message);
   };
+
+  // Only genuine auth/format failures invalidate a cached MK. A network hiccup
+  // or an unexpected error must never bounce the operator back to the gate.
+  const FATAL_CODES = new Set(["auth", "format"]);
+  const isFatalVaultError = (err) => err instanceof VaultError && FATAL_CODES.has(err.code);
 
   /* ---------------------------------------------------------------- bytes */
 
@@ -543,11 +558,38 @@
     }
   }
 
+  function showListBanner(tone, message, withRetry) {
+    nodes.listBanner.dataset.tone = tone;
+    nodes.listBannerText.textContent = message;
+    nodes.listBannerRetry.hidden = !withRetry;
+    nodes.listBanner.hidden = false;
+  }
+
+  function hideListBanner() {
+    nodes.listBanner.hidden = true;
+    nodes.listBannerRetry.hidden = true;
+  }
+
   /* ---------------------------------------------------------- report view */
 
   function clearFrame() {
     nodes.frame.hidden = true;
     nodes.frame.setAttribute("srcdoc", BLANK_DOC);
+  }
+
+  // A reused iframe that was hidden when it first received a document can silently
+  // drop later srcdoc navigations (reports paint blank); mount a fresh one instead.
+  function mountFrame(doc) {
+    const frame = document.createElement("iframe");
+    frame.id = "report-frame";
+    frame.className = "report-frame";
+    frame.setAttribute("sandbox", "allow-scripts allow-popups");
+    frame.setAttribute("referrerpolicy", "no-referrer");
+    frame.title = "报告内容";
+    frame.hidden = false;
+    nodes.frame.replaceWith(frame);
+    nodes.frame = frame;
+    frame.setAttribute("srcdoc", doc);
   }
 
   function showReportHead(entry) {
@@ -586,8 +628,7 @@
     try {
       const plain = await loadBlob(state.mk, entry);
       if (token !== openToken) return;
-      nodes.frame.setAttribute("srcdoc", srcdocFor(entry, plain));
-      nodes.frame.hidden = false;
+      mountFrame(srcdocFor(entry, plain));
       nodes.reportLoading.hidden = true;
       nodes.reportTitle.focus({ preventScroll: true });
     } catch (err) {
@@ -626,6 +667,12 @@
     nodes.gate.hidden = name !== "gate";
     nodes.list.hidden = name !== "list";
     nodes.report.hidden = name !== "report";
+    if (name !== "report") setImmerse(false);
+  }
+
+  function setImmerse(on) {
+    document.documentElement.classList.toggle("immerse", on);
+    nodes.reportCollapse.hidden = !on;
   }
 
   function setGateError(message) {
@@ -672,6 +719,7 @@
     } catch {
       /* storage unavailable */
     }
+    autoRetryLeft = 1;
     nodes.lockBtn.hidden = true;
     clearFrame();
   }
@@ -701,17 +749,95 @@
     }
   }
 
-  async function enterVault() {
-    state.unlocked = true;
-    nodes.lockBtn.hidden = false;
-    setListLoading(true);
-    showView("list");
-    const manifest = await loadManifest(state.mk);
-    state.manifest = manifest;
-    state.reports = manifest.reports.filter((entry) => entry && typeof entry === "object");
-    setListLoading(false);
-    renderList();
-    applyRoute();
+  function retryManifest() {
+    if (!state.mk) {
+      showGate();
+      return;
+    }
+    void enterVault({ viaCache: state.enteredViaCache }).catch((err) => {
+      wipeMk();
+      showGate(err instanceof VaultError && err.code === "auth"
+        ? "本机缓存的密钥已失效，请重新输入密码。"
+        : describe(err));
+    });
+  }
+
+  async function enterVault(opts) {
+    if (manifestBusy) return false;
+    manifestBusy = true;
+    const viaCache = !!(opts && opts.viaCache);
+    try {
+      state.enteredViaCache = viaCache;
+      state.unlocked = true;
+      nodes.lockBtn.hidden = false;
+      hideListBanner();
+      setListLoading(true);
+      showView("list");
+
+      let manifest;
+      try {
+        manifest = await loadManifest(state.mk);
+      } catch (err) {
+        if (isFatalVaultError(err)) throw err;
+        // Transient (network / unexpected): stay unlocked, keep the cached key,
+        // and surface a retryable state instead of the password gate.
+        setListLoading(false);
+        nodes.listMeta.textContent = "清单未加载";
+        const willRetry = autoRetryLeft > 0;
+        if (willRetry) {
+          autoRetryLeft -= 1;
+          window.setTimeout(retryManifest, 1200);
+        }
+        showListBanner("error", `${describe(err)}${willRetry ? " · 正在自动重试…" : ""}`, true);
+        return false;
+      }
+
+      state.manifest = manifest;
+      state.reports = manifest.reports.filter((entry) => entry && typeof entry === "object");
+      setListLoading(false);
+      renderList();
+      if (viaCache) showListBanner("info", "已使用本机缓存的密钥自动解锁", false);
+      applyRoute();
+      return true;
+    } finally {
+      manifestBusy = false;
+    }
+  }
+
+  /* ----------------------------------------------------------------- theme */
+
+  function readStoredTheme() {
+    try {
+      const value = localStorage.getItem(LS_THEME);
+      return value === "light" || value === "dark" ? value : null;
+    } catch {
+      return null; // storage unavailable: fall back to the OS preference
+    }
+  }
+
+  // Mirrors the inline bootstrap in index.html <head>; keep the two in sync.
+  function preferredTheme() {
+    return readStoredTheme() ||
+      (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  }
+
+  function paintTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    const next = theme === "dark" ? "light" : "dark";
+    nodes.themeBtn.setAttribute("aria-label", next === "dark" ? "切换到暗色" : "切换到亮色");
+  }
+
+  function initTheme() {
+    paintTheme(preferredTheme());
+    nodes.themeBtn.addEventListener("click", () => {
+      const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+      paintTheme(next);
+      try {
+        localStorage.setItem(LS_THEME, next);
+      } catch {
+        /* storage unavailable: the choice lives for this session only */
+      }
+    });
   }
 
   /* ---------------------------------------------------------------- events */
@@ -783,6 +909,14 @@
       if (state.activeId) void openReport(state.activeId);
     });
 
+    nodes.reportExpand.addEventListener("click", () => setImmerse(true));
+    nodes.reportCollapse.addEventListener("click", () => setImmerse(false));
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") setImmerse(false);
+    });
+
+    nodes.listBannerRetry.addEventListener("click", retryManifest);
+
     window.addEventListener("hashchange", applyRoute);
     // No window "message" listener exists on purpose: the sandbox has an opaque
     // origin, so any future listener must check event.origin === "null" (SPEC §4.5).
@@ -791,22 +925,24 @@
   /* ------------------------------------------------------------------ boot */
 
   async function boot() {
+    initTheme();
     wireEvents();
     const cached = readCachedMk();
-    if (cached) {
-      state.mk = cached;
-      try {
-        await enterVault();
-        return;
-      } catch (err) {
-        wipeMk();
-        showGate(err instanceof VaultError && err.code === "auth"
-          ? "本地会话已失效，请重新输入密码。"
-          : describe(err));
-        return;
-      }
+    if (!cached) {
+      showGate();
+      return;
     }
-    showGate();
+    state.mk = cached;
+    try {
+      await enterVault({ viaCache: true });
+    } catch (err) {
+      // Only a genuine auth/format failure invalidates the cached key;
+      // transient failures keep it and are handled inside enterVault().
+      wipeMk();
+      showGate(err instanceof VaultError && err.code === "auth"
+        ? "本机缓存的密钥已失效，请重新输入密码。"
+        : describe(err));
+    }
   }
 
   if (document.readyState === "loading") {

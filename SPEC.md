@@ -102,10 +102,12 @@ robots.txt      # Disallow: /
    - `kind==="html"`：原文注入 iframe（仍走沙箱）。
    - KaTeX 关闭 `trust`，不用 `\href`（除非明确需要）。
 5. **沙箱（硬性）**：`<iframe sandbox="allow-scripts allow-popups" srcdoc="...">`，**永不**加 `allow-same-origin` / `allow-popups-to-escape-sandbox`；报告 HTML **只**经 `srcdoc` 属性注入，绝不写入父文档。SPA 若有 `message` 监听，必须校验 `event.origin === "null"`。
-6. **CSP**：`index.html` 加严格 CSP：`default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'`。`wasm-unsafe-eval` 是 Argon2id（WebAssembly）在 Chromium 下运行的最小必需授权，缺它则解锁不可用。
+6. **CSP**：报告经 `iframe[srcdoc]` 渲染并**继承本页 CSP**，故需放行报告自带资源：`default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https:; font-src 'self' data: https://cdn.jsdelivr.net https://fonts.googleapis.com https://fonts.gstatic.com; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'`。报告的脚本/样式只在沙箱（不透明源、无 allow-same-origin）内运行，无法触达父页 localStorage 与主密钥；外壳自身仍只加载 `'self'` 本地资源。
 7. **路由**：hash 路由 `#/<id>`；启动解析 hash 直达。
 8. **锁定**：清除 `localStorage["uilz.report.mk"]` 并回密码门。
 9. **元信息**：`<meta name="robots" content="noindex,nofollow">`；移动端响应式。
+10. **每次打开重建 iframe**：曾隐藏后才收到首个文档的复用 iframe 会丢弃后续 `srcdoc` 导航（报告渲染空白），故每次 `openReport` 新建 iframe 再赋 `srcdoc`。
+11. **沉浸阅读**：报告视图提供放大/缩小切换（`html.immerse` 隐藏外壳、报告铺满视口，仅留右上角「缩小」；Esc 退出）；主题偏好独立于锁定，不被清除。
 
 ## 5. CLI 规范（Python3，stdlib + `cryptography` + `argon2-cffi`）
 
@@ -193,6 +195,7 @@ robots.txt      # Disallow: /
 
 ## 11. 变更日志
 
+- **v1.1.2**（SPA 修复）：放宽 CSP 以放行报告自带的 `cdn.jsdelivr.net` KaTeX/字体/内联脚本（`srcdoc` 继承父 CSP）；亮暗主题切换 + 持久化；缓存主密钥自动进入的瞬态容错；报告沉浸式放大/缩小；**修复报告空白**——复用且曾隐藏的 iframe 会丢弃后续 `srcdoc` 导航，改为每次新建 iframe 挂载。
 - **v1.1.1**（实现落地）：`rekey` 命令（信封重加密）；`sync` 仅在逻辑内容变化时重写 `manifest.enc`、仅在 `changed` 时 push（幂等，防 cron 空提交）；CSP 增补 `'wasm-unsafe-eval'`（Argon2 WASM 必需）；主仓 `/md` 退役并加 `404.html` 跳转至 `/report/`。
 - **v1.1**：`id` 改 32 hex；blob 名含 rev；CK 随 rev 旋转 + AAD 绑定；SPA 校验 sha256；引入本地基线状态；同步改 fetch + 逻辑合并（弃 git merge manifest）；墓碑 bump rev；`--dry-run` 不动工作树；密码 NFC；Argon2 显式参数；CSP/沙箱/DOMPurify 顺序冻结；PBKDF2 分支字段补全；锁移 `~/.cache`；补残余风险。
 - v1.0：初版。
