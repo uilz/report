@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "kdf": {
+    "algo": "argon2id",
+    "version": 19,
+    "t": 3,
+    "m": 65536,
+    "p": 1,
+    "hashLen": 32,
+    "salt": "yp63ACTSMLcYbwYxtmDzkQ=="
+  },
+  "wrapped": {
+    "iv": "48Nx3UiD3JKVvlTP",
+    "ct": "Yw5YhwiZbFCHjnUL34zdCAZGhRdh6U8VjNnhOf67Xa2qUBu/Aupy7Sx9/tfxHAKO"
+  }
+}

@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""uilz-report CLI (SPEC.md v1.1 §5).
+
+Commands: init, add, sync, pull, status, unlock-mk, rekey.
+"""
+from __future__ import annotations
+
+import argparse
+import getpass
+import os
+import secrets
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import uzrlib as U  # noqa: E402
+
+
+def _print(msg: str = "") -> None:
+    print(msg)
+
+
+def _get_password(confirm: bool) -> str:
+    env = os.environ.get("UZR_PASSWORD")
+    if env is not None:
+        if not env:
+            raise U.SyrError("UZR_PASSWORD is empty")
+        return env
+    if not sys.stdin.isatty():
+        raise U.SyrError("no password available: set UZR_PASSWORD or run interactively")
+    first = getpass.getpass("Password: ")
+    if not first:
+        raise U.SyrError("empty password")
+    if confirm:
+        second = getpass.getpass("Confirm password: ")
+        if first != second:
+            raise U.SyrError("passwords do not match")
+    return first
+
+
+def cmd_init(args, settings: U.Settings) -> int:
+    os.makedirs(settings.repo_dir, exist_ok=True)
+    os.makedirs(os.path.join(settings.repo_dir, U.BLOBS_DIR), exist_ok=True)
+    os.makedirs(settings.master_dir, exist_ok=True)
+
+    if os.path.exists(settings.mk_path) and not args.force:
+        raise U.SyrError(f"machine key already exists: {settings.mk_path} (use --force to rotate)")
+    if os.path.exists(os.path.join(settings.repo_dir, U.KEY_ENC_NAME)) and not args.force:
+        raise U.SyrError("key.enc already exists (use --force to overwrite)")
+
+    mk = secrets.token_bytes(U.MK_LEN)
+    U.save_mk(settings, mk)
+    password = _get_password(confirm=True)
+    key_doc = U.build_key_enc(password, mk)
+    with open(os.path.join(settings.repo_dir, U.KEY_ENC_NAME), "w", encoding="utf-8") as fh:
+        import json
+
+        json.dump(key_doc, fh, indent=2)
+        fh.write("\n")
+
+    manifest = U.new_manifest()
+    with open(os.path.join(settings.repo_dir, U.MANIFEST_NAME), "wb") as fh:
+        fh.write(U.encrypt_manifest(mk, manifest))
+
+    with open(os.path.join(settings.repo_dir, ".nojekyll"), "w", encoding="utf-8"):
+        pass
+    with open(os.path.join(settings.repo_dir, "robots.txt"), "w", encoding="utf-8") as fh:
+        fh.write("User-agent: *\nDisallow: /\n")
+
+    U.save_config(settings)
+
+    _print(f"repo_dir   {settings.repo_dir}")
+    _print(f"master_dir {settings.master_dir}")
+    _print(f"mk.key     {settings.mk_path} (chmod 600)")
+    _print(f"key.enc    {os.path.join(settings.repo_dir, U.KEY_ENC_NAME)}")
+    _print()
+    _print("Master key (base64) -- record this offline, it is the recovery credential:")
+    _print(f"  {U.b64e(mk)}")
+    if not args.yes and sys.stdin.isatty():
+        answer = input("Type YES once you have transcribed the master key: ").strip()
+        if answer != "YES":
+            raise U.SyrError("master key not confirmed; aborting")
+    return 0
+
+
+def _dedupe(dest: str) -> str:
+    if not os.path.exists(dest):
+        return dest
+    root, ext = os.path.splitext(dest)
+    i = 1
+    while True:
+        candidate = f"{root}-{i}{ext}"
+        if not os.path.exists(candidate):
+            return candidate
+        i += 1
+
+
+def cmd_add(args, settings: U.Settings) -> int:
+    src = os.path.abspath(args.file)
+    if not os.path.isfile(src):
+        raise U.SyrError(f"not a file: {src}")
+    os.makedirs(settings.master_dir, exist_ok=True)
+    with U.sync_lock(settings):
+        dest = _dedupe(os.path.join(settings.master_dir, os.path.basename(src)))
+        with open(src, "rb") as fh:
+            data = fh.read()
+        with open(dest, "wb") as fh:
+            fh.write(data)
+        rel = os.path.relpath(dest, settings.master_dir)
+        if args.title:
+            U.save_title(settings, rel, args.title)
+    _print(f"added {rel} ({len(data)} bytes); run `report sync` to publish")
+    return 0
+
+
+def cmd_sync(args, settings: U.Settings) -> int:
+    mk = U.load_mk(settings)
+    result = U.sync(settings, mk, dry_run=args.dry_run, no_push=args.no_push)
+    if args.dry_run:
+        _print("dry-run (no working-tree mutation, baseline untouched)")
+        _print(f"  baseline ids : {len(result['baseline'])}")
+        _print(f"  local ids    : {len(result['local'])}")
+        _print(f"  remote ids   : {len(result['remote'])}")
+        _print(f"  planned ids  : {len(result['planned'])}")
+        for op in result["ops"]:
+            if op[0] == "move":
+                _print(f"  conflict: {op[1]} -> {op[2]} (both sides changed)")
+            elif op[0] == "materialize":
+                _print(f"  pull    : {op[3]} (rev {op[2]})")
+            elif op[0] == "delete":
+                _print(f"  delete  : {op[1]}")
+        return 0
+    _print(
+        f"sync ok: {result['reports']} reports, "
+        f"{'committed' if result['changed'] else 'no local changes'}, "
+        f"{'pushed' if result['pushed'] else 'not pushed'}"
+    )
+    return 0
+
+
+def cmd_pull(args, settings: U.Settings) -> int:
+    mk = U.load_mk(settings)
+    result = U.pull(settings, mk)
+    _print(f"pull ok: {result['reports']} reports materialized, baseline updated")
+    return 0
+
+
+def cmd_status(args, settings: U.Settings) -> int:
+    mk = U.load_mk(settings)
+    _print(U.status(settings, mk))
+    return 0
+
+
+def cmd_unlock_mk(args, settings: U.Settings) -> int:
+    mk = U.load_mk(settings)
+    if not args.yes and sys.stdin.isatty():
+        answer = input(f"Export master key to {args.out}? [y/N] ").strip().lower()
+        if answer not in ("y", "yes"):
+            raise U.SyrError("aborted")
+    out = os.path.abspath(args.out)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="ascii") as fh:
+        fh.write(U.b64e(mk) + "\n")
+    os.chmod(out, 0o600)
+    _print(f"master key written to {out} (chmod 600). Keep it off any public repo.")
+    return 0
+
+
+def cmd_rekey(args, settings: U.Settings) -> int:
+    """Re-wrap the existing master key under a new password (envelope re-key)."""
+    import json
+
+    mk = U.load_mk(settings)
+    password = _get_password(confirm=True)
+    key_doc = U.build_key_enc(password, mk)
+    path = os.path.join(settings.repo_dir, U.KEY_ENC_NAME)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(key_doc, fh, indent=2)
+        fh.write("\n")
+    _print(f"key.enc re-wrapped under the new password: {path}")
+    _print("Publish it with `report sync` (the content blobs are unchanged).")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--config", default=argparse.SUPPRESS)
+    common.add_argument("--repo-dir", dest="repo_dir", default=argparse.SUPPRESS)
+    common.add_argument("--master-dir", dest="master_dir", default=argparse.SUPPRESS)
+    common.add_argument("--remote", default=argparse.SUPPRESS)
+    common.add_argument("--branch", default=argparse.SUPPRESS)
+    common.add_argument("--mk-file", dest="mk_file", default=argparse.SUPPRESS)
+
+    parser = argparse.ArgumentParser(prog="report", description="uilz-report encrypted report vault")
+    parser.add_argument("--config")
+    parser.add_argument("--repo-dir", dest="repo_dir")
+    parser.add_argument("--master-dir", dest="master_dir")
+    parser.add_argument("--remote")
+    parser.add_argument("--branch")
+    parser.add_argument("--mk-file", dest="mk_file")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("init", parents=[common], help="create MK, key.enc and empty manifest")
+    p.add_argument("--yes", action="store_true", help="skip the master-key transcription confirmation")
+    p.add_argument("--force", action="store_true", help="overwrite existing mk.key/key.enc")
+    p.set_defaults(func=cmd_init)
+
+    p = sub.add_parser("add", parents=[common], help="copy a plaintext file into master_dir")
+    p.add_argument("file")
+    p.add_argument("--title")
+    p.set_defaults(func=cmd_add)
+
+    p = sub.add_parser("sync", parents=[common], help="fetch, merge, re-encrypt, commit, push")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--no-push", action="store_true")
+    p.set_defaults(func=cmd_sync)
+
+    p = sub.add_parser("pull", parents=[common], help="decrypt remote into master_dir and update baseline")
+    p.set_defaults(func=cmd_pull)
+
+    p = sub.add_parser("status", parents=[common], help="show local/remote/baseline differences")
+    p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("unlock-mk", parents=[common], help="export base64 MK to a file")
+    p.add_argument("--out", required=True)
+    p.add_argument("--yes", action="store_true")
+    p.set_defaults(func=cmd_unlock_mk)
+
+    p = sub.add_parser("rekey", parents=[common], help="re-wrap the master key under a new password")
+    p.set_defaults(func=cmd_rekey)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        settings = U.load_settings(
+            config_path=args.config,
+            repo_dir=args.repo_dir,
+            master_dir=args.master_dir,
+            remote=args.remote,
+            branch=args.branch,
+            mk_file=args.mk_file,
+        )
+        return args.func(args, settings)
+    except U.SyrError as exc:
+        _print(f"error: {exc}")
+        return 1
+    except KeyboardInterrupt:
+        _print("interrupted")
+        return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
