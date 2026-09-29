@@ -10,6 +10,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -104,7 +105,8 @@ OFFICE_EXTS = frozenset(
 
 
 def kind_for(path: str) -> str:
-    ext = os.path.splitext(path)[1].lower()
+    base = re.sub(r"\.conflict-[0-9a-f]{8}-\d+$", "", path)
+    ext = os.path.splitext(base)[1].lower()
     if ext in MD_EXTS:
         return "md"
     if ext in HTML_EXTS:
@@ -875,6 +877,8 @@ def plan_merge(
             nid, path, {"title": title} if title else None, 1, info["sha"], info["size"], now
         )
 
+    for entry in reports.values():
+        entry["kind"] = kind_for(entry["path"])
     return reports, ops
 
 

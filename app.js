@@ -479,8 +479,10 @@
 
   function formatDate(iso) {
     if (typeof iso !== "string" || !ISO_RE.test(iso)) return String(iso || "");
-    const [date, time] = iso.split("T");
-    return `${date} ${time.slice(0, 5)} UTC`;
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const two = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;
   }
 
   function formatSize(size) {
