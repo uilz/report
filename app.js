@@ -84,6 +84,8 @@
     pdfPagecount: el("pdf-pagecount"),
     pdfFit: el("pdf-fit"),
     pdfOpen: el("pdf-open"),
+    topbarActions: document.querySelector(".topbar-actions"),
+    reportHead: document.querySelector(".report-head"),
   };
 
   /* ----------------------------------------------------------------- state */
@@ -863,12 +865,21 @@
 
   /* ----------------------------------------------------------------- views */
 
+  function placeActions(inReport) {
+    if (inReport) nodes.reportHead.insertBefore(nodes.topbarActions, nodes.reportExpand);
+    else nodes.topbar.appendChild(nodes.topbarActions);
+    nodes.topbar.classList.remove("is-hidden");
+    nodes.reportHead.classList.remove("is-hidden");
+  }
+
   function showView(name) {
+    const inReport = name === "report";
     nodes.gate.hidden = name !== "gate";
     nodes.list.hidden = name !== "list";
     nodes.report.hidden = name !== "report";
-    document.documentElement.classList.toggle("viewing-report", name === "report");
-    if (name !== "report") setImmerse(false);
+    document.documentElement.classList.toggle("viewing-report", inReport);
+    placeActions(inReport);
+    if (!inReport) setImmerse(false);
   }
 
   function setImmerse(on) {
@@ -1146,13 +1157,20 @@
 
     window.addEventListener("hashchange", applyRoute);
 
-    let lastScrollY = window.scrollY || 0;
-    window.addEventListener("scroll", () => {
-      const y = window.scrollY || 0;
-      if (y > lastScrollY + 6 && y > 48) nodes.topbar.classList.add("is-hidden");
-      else if (y < lastScrollY - 6) nodes.topbar.classList.remove("is-hidden");
-      lastScrollY = y;
-    }, { passive: true });
+    const activeChrome = () =>
+      document.documentElement.classList.contains("viewing-report") ? nodes.reportHead : nodes.topbar;
+    const wireScrollHide = (el, readY) => {
+      let last = readY();
+      el.addEventListener("scroll", () => {
+        const y = readY();
+        const bar = activeChrome();
+        if (y > last + 6 && y > 48) bar.classList.add("is-hidden");
+        else if (y < last - 6) bar.classList.remove("is-hidden");
+        last = y;
+      }, { passive: true });
+    };
+    wireScrollHide(window, () => window.scrollY || 0);
+    wireScrollHide(nodes.pdfPages, () => nodes.pdfPages.scrollTop || 0);
 
     window.addEventListener("resize", () => {
       window.clearTimeout(pdfResizeTimer);

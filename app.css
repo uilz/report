@@ -871,6 +871,7 @@ button, input { font: inherit; color: inherit; }
   .pdf-toolbar { padding: var(--s2); }
   .pdf-pages { padding: var(--s2); gap: var(--s3); }
   .report-head { gap: var(--s2); }
+  html.viewing-report .report-head { margin: calc(-1 * var(--s4)) calc(-1 * var(--s3)) var(--s4); padding: var(--s2) var(--s3); }
   .report-title { font-size: var(--text-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .report-head .zoom-btn { padding: 0 0.7rem; }
   .report-head .zoom-btn span { display: none; }
@@ -949,6 +950,23 @@ html.viewing-report .report-frame {
   border-radius: 0;
   box-shadow: none;
 }
+
+html.viewing-report .topbar { display: none; }
+
+html.viewing-report .report-head {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  margin: calc(-1 * var(--s5)) calc(-1 * var(--s4)) var(--s4);
+  padding: var(--s3) var(--s4);
+  background: var(--bg-scrim);
+  backdrop-filter: saturate(1.2) blur(10px);
+  -webkit-backdrop-filter: saturate(1.2) blur(10px);
+  border-bottom: 1px solid var(--line);
+  transition: transform 200ms var(--ease);
+}
+
+html.viewing-report .report-head.is-hidden { transform: translateY(-100%); }
 
 html.viewing-report .pdf-view {
   border: 0;
