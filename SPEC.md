@@ -199,12 +199,13 @@ robots.txt      # Disallow: /
 - **v1.1.1**（实现落地）：`rekey` 命令（信封重加密）；`sync` 仅在逻辑内容变化时重写 `manifest.enc`、仅在 `changed` 时 push（幂等，防 cron 空提交）；CSP 增补 `'wasm-unsafe-eval'`（Argon2 WASM 必需）；主仓 `/md` 退役并加 `404.html` 跳转至 `/report/`。
 - **v1.1**：`id` 改 32 hex；blob 名含 rev；CK 随 rev 旋转 + AAD 绑定；SPA 校验 sha256；引入本地基线状态；同步改 fetch + 逻辑合并（弃 git merge manifest）；墓碑 bump rev；`--dry-run` 不动工作树；密码 NFC；Argon2 显式参数；CSP/沙箱/DOMPurify 顺序冻结；PBKDF2 分支字段补全；锁移 `~/.cache`；补残余风险。
 - v1.0：初版。
-- **v1.2**（多格式）：`kind` 扩展为 **md/html/pdf/text**；Office（docx/doc/odt/xlsx/pptx…）在发布时由 **LibreOffice 转成 PDF**（源文件不发布）；`.txt/.csv/...` → text；新增 `report convert`；SPA 用 **pdf.js 内嵌**渲染 PDF、`<pre>` 渲染文本。
+- **v1.2.1**：`kind` 改为**由路径推导**（修复陈旧 `kind` 导致 PDF 乱码）；Office **原件也发布**（`kind=office`，供另一台机器 pull/下载后编辑）＋同名转换 PDF；SPA 显示**本地时间**；报告页**顶栏合并为一条**并随滚动收起；office 条目渲染「下载原件 / 查看 PDF 预览」面板。
+- **v1.2**（多格式）：`kind` 扩展为 **md/html/pdf/text**；Office（docx/doc/odt/xlsx/pptx…）在发布时由 **LibreOffice 转成 PDF**；`.txt/.csv/...` → text；新增 `report convert`；SPA 用 **pdf.js 内嵌**渲染 PDF、`<pre>` 渲染文本。
 
 ## 12. 多格式契约（v1.2）
 
 - `kind_for`：`.md/.markdown`→`md`；`.html/.htm`→`html`；`.pdf`→`pdf`；Office 后缀（`.docx/.doc/.odt/.rtf/.xlsx/.xls/.ods/.pptx/.ppt/.odp`）→`office`（**不发布**）；其余→`text`。
-- 发布清单**只含** md/html/pdf/text。Office 源在母版目录被**忽略**，其同名 `<stem>.pdf` 作为报告发布（`kind=pdf`，标题=源文件主干名）。
+- 发布清单含 **md/html/pdf/text/office**。Office 源**原样发布**（`kind=office`，供另一台机器 `pull`/下载后编辑），同时其同名 `<stem>.pdf` 也发布（`kind=pdf`）用于浏览。
 - 转换命令：`soffice --headless --convert-to pdf --outdir <源目录> -env:UserInstallation=file:///tmp/uzr-lo-<uid> <src>`，超时 120s；失败/超时即**中止同步**。
 - 幂等：`<master_dir>/.report-convert.json` 记录 `源→源 sha256`；源未变则**不再转换**（二次 sync 无空提交、PDF 字节不变）。
 - SPA 渲染：md（marked+KaTeX+DOMPurify）、html（原样）、text（`<pre>` 转义）→ **沙箱 iframe**；**pdf → 父页用 pdf.js 渲染到 canvas**（沙箱内 Chromium 禁用原生 PDF 插件，且不透明源无法加载本地脚本），并提供「在新标签打开」用原生查看器。

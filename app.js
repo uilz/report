@@ -84,6 +84,11 @@
     pdfPagecount: el("pdf-pagecount"),
     pdfFit: el("pdf-fit"),
     pdfOpen: el("pdf-open"),
+    officeView: el("office-view"),
+    officeName: el("office-name"),
+    officeMeta: el("office-meta"),
+    officeDownload: el("office-download"),
+    officePreview: el("office-preview"),
     topbarActions: document.querySelector(".topbar-actions"),
     reportHead: document.querySelector(".report-head"),
   };
@@ -99,6 +104,7 @@
     activeId: null,
     keyDocPromise: null,
     enteredViaCache: false,
+    officeBytes: null,
   };
   let openToken = 0;
   let manifestBusy = false;
@@ -522,9 +528,16 @@
       .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
   }
 
+  function kindLabel(entry) {
+    if (entry.kind === "office") {
+      const ext = String(entry.path || "").split(".").pop().toUpperCase();
+      return ext && ext !== String(entry.path) ? ext : "FILE";
+    }
+    return KIND_LABELS[entry.kind] || String(entry.kind || "?").toUpperCase();
+  }
+
   function metaLine(entry, withSha = true) {
-    const kind = String(entry.kind || "");
-    const bits = [KIND_LABELS[kind] || kind.toUpperCase(), `r${entry.rev}`];
+    const bits = [kindLabel(entry), `r${entry.rev}`];
     if (Number.isFinite(entry.size)) bits.push(formatSize(entry.size));
     if (entry.updatedAt) bits.push(formatDate(entry.updatedAt));
     if (withSha && typeof entry.sha256 === "string" && entry.sha256) {
@@ -569,9 +582,9 @@
       side.className = "row-side";
 
       const chip = document.createElement("span");
-      const kind = KIND_LABELS[entry.kind] ? entry.kind : "";
-      chip.className = kind ? `chip chip-${kind}` : "chip";
-      chip.textContent = KIND_LABELS[kind] || String(entry.kind || "?").toUpperCase();
+      const known = KIND_LABELS[entry.kind] || entry.kind === "office";
+      chip.className = known ? `chip chip-${entry.kind}` : "chip";
+      chip.textContent = kindLabel(entry);
 
       const rev = document.createElement("span");
       rev.className = "row-rev";
@@ -640,6 +653,40 @@
   function resetViews() {
     clearFrame();
     hidePdf();
+    hideOffice();
+  }
+
+  function hideOffice() {
+    nodes.officeView.hidden = true;
+    state.officeBytes = null;
+  }
+
+  function showOffice(entry, bytes) {
+    state.officeBytes = bytes;
+    nodes.officeName.textContent = String(entry.path || entry.title || "文件").split("/").pop();
+    nodes.officeMeta.textContent = metaLine(entry, false);
+    const stem = String(entry.path || "").replace(/\.[^./]+$/, "");
+    const sibling = state.reports.find(
+      (r) => r && !r.deleted && r.kind === "pdf" && r.path === `${stem}.pdf`
+    );
+    if (sibling) {
+      nodes.officePreview.hidden = false;
+      nodes.officePreview.setAttribute("href", `#/${sibling.id}`);
+    } else {
+      nodes.officePreview.hidden = true;
+      nodes.officePreview.removeAttribute("href");
+    }
+    nodes.officeDownload.onclick = () => {
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = String(entry.path || "file").split("/").pop();
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+    };
+    nodes.officeView.hidden = false;
   }
 
   // A reused iframe that was hidden when it first received a document can silently
@@ -829,6 +876,12 @@
         nodes.pdfPagecount.textContent = "加载中…";
         await renderPdf(plain, token);
         if (token !== openToken) return;
+        nodes.reportTitle.focus({ preventScroll: true });
+        return;
+      }
+      if (entry.kind === "office") {
+        showOffice(entry, plain);
+        nodes.reportLoading.hidden = true;
         nodes.reportTitle.focus({ preventScroll: true });
         return;
       }

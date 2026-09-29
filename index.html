@@ -152,6 +152,21 @@
         </div>
         <div id="pdf-pages" class="pdf-pages"></div>
       </div>
+      <div id="office-view" class="office-view" hidden>
+        <div class="office-card">
+          <svg class="office-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M7 3h7l5 5v12a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+            <path d="M14 3v5h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          </svg>
+          <p id="office-name" class="office-name"></p>
+          <p id="office-meta" class="office-meta"></p>
+          <div class="office-actions">
+            <button id="office-download" class="btn btn-primary" type="button">下载原件</button>
+            <a id="office-preview" class="btn btn-ghost" href="#" hidden>查看 PDF 预览</a>
+          </div>
+          <p class="office-hint">原件按原始格式加密保存，可下载或在另一台电脑同步后编辑；旁边的 PDF 为浏览预览。</p>
+        </div>
+      </div>
       <div id="report-loading" class="report-overlay" hidden>
         <span class="spinner" aria-hidden="true"></span>
         <span>解密并校验内容…</span>

@@ -520,9 +520,7 @@ def _is_ignored(rel: str) -> bool:
     if any(p.startswith(".") for p in parts):
         return True
     base = os.path.basename(rel)
-    if base in (STATE_NAME, META_NAME):
-        return True
-    return is_office_path(base)
+    return base in (STATE_NAME, META_NAME)
 
 
 def scan_master(settings: Settings) -> dict:

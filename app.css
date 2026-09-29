@@ -565,6 +565,7 @@ button, input { font: inherit; color: inherit; }
 }
 
 .chip-text { color: var(--ink-faint); }
+.chip-office { color: var(--ink-dim); border-color: var(--line-strong); background: var(--surface-2); }
 
 .row-rev {
   font-family: var(--font-mono);
@@ -967,6 +968,37 @@ html.viewing-report .report-head {
 }
 
 html.viewing-report .report-head.is-hidden { transform: translateY(-100%); }
+
+.office-view {
+  flex: 1;
+  min-height: 22rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s5);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.office-card {
+  max-width: 34rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s3);
+  text-align: center;
+}
+
+.office-ico { width: 2.5rem; height: 2.5rem; color: var(--brass); }
+.office-name { font-size: var(--text-lg); font-weight: 650; overflow-wrap: anywhere; }
+.office-meta { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ink-faint); }
+.office-actions { display: flex; flex-wrap: wrap; gap: var(--s2); justify-content: center; }
+.office-hint { font-size: var(--text-sm); color: var(--ink-dim); max-width: 30rem; }
+
+html.viewing-report .office-view,
+html.immerse .office-view { border: 0; border-radius: 0; box-shadow: none; }
 
 html.viewing-report .pdf-view {
   border: 0;

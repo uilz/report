@@ -4,8 +4,9 @@
 Builds fixtures (txt/md/pdf/docx) in temp dirs, runs init/add/sync --no-push
 against a local repo, then decrypts the manifest and asserts:
   * .txt/.md/.pdf carry kinds text/md/pdf;
-  * the .docx is converted to a published ``deck.pdf`` (kind pdf) and the
-    docx source itself is NOT a manifest entry, and no "office" kind appears;
+  * the .docx is published as-is (kind "office", so another PC can
+    pull/download the original for editing) AND converted to ``deck.pdf``
+    (kind pdf) for browsing;
   * a second sync is a no-op ("no local changes") and does not reconvert;
   * editing the docx triggers exactly one reconversion (rev+1).
 Local tools only (pandoc, soffice/libreoffice); no network. Prints PASS/FAIL.
@@ -140,16 +141,18 @@ def main() -> int:
         entries = by_path(manifest)
         paths = set(entries)
 
-        check(paths == {"notes.txt", "guide.md", "paper.pdf", "deck.pdf"},
+        check(paths == {"notes.txt", "guide.md", "paper.pdf", "deck.docx", "deck.pdf"},
               f"unexpected manifest paths: {sorted(paths)}")
         check(entries["notes.txt"]["kind"] == "text", "notes.txt must be kind text")
         check(entries["guide.md"]["kind"] == "md", "guide.md must be kind md")
         check(entries["paper.pdf"]["kind"] == "pdf", "paper.pdf must be kind pdf")
         check(entries["deck.pdf"]["kind"] == "pdf", "converted deck must be kind pdf")
         check(entries["deck.pdf"]["title"] == "deck", "converted pdf title must be the source stem")
-        check("deck.docx" not in paths, "office source must never be a manifest entry")
-        check(all(e["kind"] in ("md", "html", "pdf", "text") for e in manifest["reports"]),
-              "manifest may only contain kinds md/html/pdf/text")
+        check(entries["deck.docx"]["kind"] == "office", "office source must be published as kind office")
+        check(entries["deck.docx"]["sha256"] == U.sha256_hex(read_bytes(os.path.join(master, "deck.docx"))),
+              "office source blob must be the original bytes")
+        check(all(e["kind"] in ("md", "html", "pdf", "text", "office") for e in manifest["reports"]),
+              "manifest kinds must be md/html/pdf/text/office")
 
         check(os.path.exists(os.path.join(master, "deck.docx")), "docx source must remain on disk")
         check(os.path.exists(os.path.join(master, "deck.pdf")), "generated deck.pdf missing")
