@@ -172,11 +172,12 @@ robots.txt      # Disallow: /
 
 ## 8. 运维（本机 WSL）
 
-- **cron**（`cron.service` 常驻）：每 10 分钟
-  `flock -n ~/.cache/uzr-sync.lock <wrapper> sync >> ~/.cache/uzr-sync.log 2>&1`。
-- 锁文件放 **`~/.cache/`**（非 `/tmp`）。
-- 非交互 git：`uilz/report` 用**独立 deploy key**，`GIT_SSH_COMMAND="ssh -i <key> -o IdentitiesOnly=yes"`。
-- push 被拒 → 记录并退出，**不 force**。
+- **cron**（`cron.service` 常驻，每 2 分钟）执行 `~/.local/bin/uzr-sync.sh`：先算母版目录的**本地指纹**（`find` 路径+大小+mtime，排除隐藏文件）——
+  - 指纹未变且距上次轮询 < 30 分钟 → **直接退出（零网络）**；
+  - 否则运行 `report sync`（变更即时发布；空闲时仅每 30 分钟轮询一次远端，以拉取另一台机器的改动）。
+- 效果：空闲 tick ≈ 0.1s（不发网络）；有变更 ≈ 数秒（fetch+加密+commit+push）。
+- wrapper 自持 `flock ~/.cache/uzr-watch.lock`；CLI 另有 `~/.cache/uzr-sync.lock`。
+- 非交互 git：`GIT_SSH_COMMAND="ssh -i <key> -o IdentitiesOnly=yes"`；`fetch/push` 带 3 次退避重试；push 被拒**不 force**。
 
 ## 9. 迁移（旧 /md）
 
