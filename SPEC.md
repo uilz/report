@@ -172,7 +172,7 @@ robots.txt      # Disallow: /
 
 ## 8. 运维（本机 WSL）
 
-- **cron**（`cron.service` 常驻，每 2 分钟）执行 `~/.local/bin/uzr-sync.sh`：先算母版目录的**本地指纹**（`find` 路径+大小+mtime，排除隐藏文件）——
+- **cron**（`cron.service` 常驻，每 2 分钟）执行 `~/.local/bin/uzr-sync.sh`：先算母版目录的**内容指纹**（对所有非隐藏文件取 `sha256`，与 sync 的明文 sha 判据一致）——
   - 指纹未变且距上次轮询 < 30 分钟 → **直接退出（零网络）**；
   - 否则运行 `report sync`（变更即时发布；空闲时仅每 30 分钟轮询一次远端，以拉取另一台机器的改动）。
 - 效果：空闲 tick ≈ 0.1s（不发网络）；有变更 ≈ 数秒（fetch+加密+commit+push）。
