@@ -108,6 +108,7 @@
   };
   let openToken = 0;
   let manifestBusy = false;
+  let frameScrollLast = 0;
   let autoRetryLeft = 1;
   let pdfResizeTimer = 0;
 
@@ -654,6 +655,7 @@
     clearFrame();
     hidePdf();
     hideOffice();
+    frameScrollLast = 0;
   }
 
   function hideOffice() {
@@ -701,7 +703,16 @@
     frame.hidden = false;
     nodes.frame.replaceWith(frame);
     nodes.frame = frame;
-    frame.setAttribute("srcdoc", doc);
+    frame.setAttribute("srcdoc", withScrollRelay(doc));
+  }
+
+  // Sandboxed report iframes have an opaque origin, so the parent cannot observe
+  // their scroll; the report relays its scroll position via postMessage instead.
+  function withScrollRelay(html) {
+    const relay = "<script>(function(){addEventListener('scroll',function(){var y=window.scrollY||document.documentElement.scrollTop||0;parent.postMessage('uzr-scroll:'+y,'*')},{passive:true});})();</" + "script>";
+    if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, relay + "</body>");
+    if (/<\/html>/i.test(html)) return html.replace(/<\/html>/i, relay + "</html>");
+    return html + relay;
   }
 
   function showReportHead(entry) {
@@ -935,6 +946,17 @@
     document.documentElement.classList.toggle("viewing-report", inReport);
     placeActions(inReport);
     if (!inReport) setImmerse(false);
+  }
+
+  function activeChrome() {
+    return document.documentElement.classList.contains("viewing-report") ? nodes.reportHead : nodes.topbar;
+  }
+
+  function chromeScroll(y, last) {
+    const bar = activeChrome();
+    if (y > last + 6 && y > 48) bar.classList.add("is-hidden");
+    else if (y < last - 6) bar.classList.remove("is-hidden");
+    return y;
   }
 
   function setImmerse(on) {
@@ -1212,20 +1234,15 @@
 
     window.addEventListener("hashchange", applyRoute);
 
-    const activeChrome = () =>
-      document.documentElement.classList.contains("viewing-report") ? nodes.reportHead : nodes.topbar;
-    const wireScrollHide = (el, readY) => {
-      let last = readY();
-      el.addEventListener("scroll", () => {
-        const y = readY();
-        const bar = activeChrome();
-        if (y > last + 6 && y > 48) bar.classList.add("is-hidden");
-        else if (y < last - 6) bar.classList.remove("is-hidden");
-        last = y;
-      }, { passive: true });
-    };
-    wireScrollHide(window, () => window.scrollY || 0);
-    wireScrollHide(nodes.pdfPages, () => nodes.pdfPages.scrollTop || 0);
+    let windowLast = 0;
+    window.addEventListener("scroll", () => { windowLast = chromeScroll(window.scrollY || 0, windowLast); }, { passive: true });
+    let pdfLast = 0;
+    nodes.pdfPages.addEventListener("scroll", () => { pdfLast = chromeScroll(nodes.pdfPages.scrollTop || 0, pdfLast); }, { passive: true });
+    window.addEventListener("message", (event) => {
+      if (event.source !== nodes.frame.contentWindow) return;
+      const data = String(event.data || "");
+      if (data.startsWith("uzr-scroll:")) frameScrollLast = chromeScroll(Number(data.slice(11)) || 0, frameScrollLast);
+    });
 
     window.addEventListener("resize", () => {
       window.clearTimeout(pdfResizeTimer);
