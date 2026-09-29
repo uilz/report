@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import secrets
+import shutil
 import subprocess
 import unicodedata
 from contextlib import contextmanager
@@ -44,6 +45,7 @@ SHA_HEX_LEN = 64
 
 STATE_NAME = ".report-state.json"
 META_NAME = ".report-meta.json"
+CONVERT_STATE_NAME = ".report-convert.json"
 MANIFEST_NAME = "manifest.enc"
 KEY_ENC_NAME = "key.enc"
 BLOBS_DIR = "blobs"
@@ -51,6 +53,8 @@ BLOBS_DIR = "blobs"
 DEFAULT_REMOTE = "origin"
 DEFAULT_BRANCH = "main"
 COMMIT_IDENTITY = ["-c", "user.name=uilz-report", "-c", "user.email=uilz-report@localhost"]
+
+CONVERT_TIMEOUT = 120
 
 
 class SyrError(Exception):
@@ -88,8 +92,32 @@ def info_blob(report_id: str, rev: int) -> bytes:
     return BLOB_INFO_PREFIX + report_id.encode("ascii") + b":" + str(rev).encode("ascii")
 
 
+MD_EXTS = frozenset({".md", ".markdown"})
+HTML_EXTS = frozenset({".html", ".htm"})
+PDF_EXTS = frozenset({".pdf"})
+TEXT_EXTS = frozenset(
+    {".txt", ".csv", ".log", ".json", ".xml", ".yaml", ".yml", ".ini", ".conf", ".tsv"}
+)
+OFFICE_EXTS = frozenset(
+    {".docx", ".doc", ".odt", ".rtf", ".xlsx", ".xls", ".ods", ".pptx", ".ppt", ".odp"}
+)
+
+
 def kind_for(path: str) -> str:
-    return "md" if os.path.splitext(path)[1].lower() in (".md", ".markdown") else "html"
+    ext = os.path.splitext(path)[1].lower()
+    if ext in MD_EXTS:
+        return "md"
+    if ext in HTML_EXTS:
+        return "html"
+    if ext in PDF_EXTS:
+        return "pdf"
+    if ext in OFFICE_EXTS:
+        return "office"
+    return "text"
+
+
+def is_office_path(path: str) -> bool:
+    return os.path.splitext(path)[1].lower() in OFFICE_EXTS
 
 
 def stem_for(path: str) -> str:
@@ -490,7 +518,9 @@ def _is_ignored(rel: str) -> bool:
     if any(p.startswith(".") for p in parts):
         return True
     base = os.path.basename(rel)
-    return base in (STATE_NAME, META_NAME)
+    if base in (STATE_NAME, META_NAME):
+        return True
+    return is_office_path(base)
 
 
 def scan_master(settings: Settings) -> dict:
@@ -511,6 +541,113 @@ def scan_master(settings: Settings) -> dict:
             data = read_stable(full)
             out[rel] = {"sha": sha256_hex(data), "size": len(data)}
     return out
+
+
+# --------------------------------------------------------------------------
+# Office -> PDF conversion (format contract / SPEC §5)
+# --------------------------------------------------------------------------
+def convert_state_path(settings: Settings) -> str:
+    return os.path.join(settings.master_dir, CONVERT_STATE_NAME)
+
+
+def load_convert_state(settings: Settings) -> dict:
+    path = convert_state_path(settings)
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(doc, dict):
+        return {}
+    return {str(k): str(v) for k, v in doc.items()}
+
+
+def save_convert_state(settings: Settings, mapping: dict) -> None:
+    os.makedirs(settings.master_dir, exist_ok=True)
+    with open(convert_state_path(settings), "w", encoding="utf-8") as fh:
+        json.dump(mapping, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+
+
+def list_office_sources(master_dir: str) -> list[tuple[str, str]]:
+    """Return sorted (relpath, abspath) for every office input under master_dir."""
+    out: list[tuple[str, str]] = []
+    if not os.path.isdir(master_dir):
+        return out
+    for dirpath, dirnames, filenames in os.walk(master_dir):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        for name in filenames:
+            if name.startswith(".") or not is_office_path(name):
+                continue
+            full = os.path.join(dirpath, name)
+            out.append((os.path.relpath(full, master_dir), full))
+    return sorted(out)
+
+
+def _libreoffice_bin() -> str:
+    for name in ("soffice", "libreoffice"):
+        found = shutil.which(name)
+        if found:
+            return found
+    raise SyrError("LibreOffice not found: install soffice/libreoffice to publish office documents")
+
+
+def _convert_one(src: str) -> str:
+    outdir = os.path.dirname(src) or "."
+    cmd = [
+        _libreoffice_bin(),
+        "--headless",
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        outdir,
+        f"-env:UserInstallation=file:///tmp/uzr-lo-{os.getuid()}",
+        src,
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=CONVERT_TIMEOUT)
+    except subprocess.TimeoutExpired as exc:
+        raise SyrError(
+            f"libreoffice conversion timed out after {CONVERT_TIMEOUT}s: {os.path.basename(src)}"
+        ) from exc
+    if proc.returncode != 0:
+        err = proc.stderr.decode("utf-8", "replace").strip()
+        if not err:
+            err = proc.stdout.decode("utf-8", "replace").strip()
+        raise SyrError(f"libreoffice conversion failed for {os.path.basename(src)}: {err}")
+    target = os.path.join(outdir, stem_for(src) + ".pdf")
+    if not os.path.exists(target):
+        raise SyrError(
+            f"libreoffice produced no {os.path.basename(target)} for {os.path.basename(src)}"
+        )
+    return target
+
+
+def convert_office(settings: Settings, *, dry_run: bool = False) -> dict:
+    """Ensure every office input has an up-to-date sibling ``<stem>.pdf``.
+
+    Staleness is keyed by the source sha256 recorded in ``.report-convert.json``;
+    an unchanged source with an existing PDF is never reconverted.
+    """
+    sources = list_office_sources(settings.master_dir)
+    state = load_convert_state(settings)
+    new_state: dict = {}
+    converted: dict = {}
+    for rel, full in sources:
+        sha = sha256_hex(read_stable(full))
+        target = os.path.join(os.path.dirname(full) or settings.master_dir, stem_for(full) + ".pdf")
+        up_to_date = state.get(rel) == sha and os.path.exists(target)
+        if not up_to_date and not dry_run:
+            _convert_one(full)
+            converted[rel] = os.path.relpath(target, settings.master_dir)
+        elif not up_to_date:
+            converted[rel] = os.path.relpath(target, settings.master_dir)
+        new_state[rel] = sha
+    if not dry_run and new_state != state:
+        save_convert_state(settings, new_state)
+    return {"converted": converted, "sources": len(sources), "state": new_state}
 
 
 def safe_join(base: str, rel: str) -> str:
@@ -835,6 +972,7 @@ def sync(settings: Settings, mk: bytes, *, dry_run: bool = False, no_push: bool 
         remote_map = index_reports(read_remote_manifest(settings, mk))
         local_map = index_reports(read_local_manifest(settings, mk))
         baseline = read_baseline(settings)["entries"]
+        conversions = convert_office(settings, dry_run=dry_run)
         snapshot = scan_master(settings)
         titles = load_titles(settings)
         now = now_iso()
@@ -850,6 +988,7 @@ def sync(settings: Settings, mk: bytes, *, dry_run: bool = False, no_push: bool 
                 "baseline": set(baseline),
                 "planned": set(reports),
                 "ops": ops,
+                "conversions": conversions["converted"],
             }
 
         apply_plan(settings, mk, reports, ops)
@@ -875,7 +1014,12 @@ def sync(settings: Settings, mk: bytes, *, dry_run: bool = False, no_push: bool 
             pushed = True
         # Baseline records the committed local reality so re-syncs are idempotent.
         write_baseline(settings, [reports[k] for k in sorted(reports)], now)
-        return {"changed": changed, "pushed": pushed, "reports": len(reports)}
+        return {
+            "changed": changed,
+            "pushed": pushed,
+            "reports": len(reports),
+            "conversions": conversions["converted"],
+        }
 
 
 def pull(settings: Settings, mk: bytes) -> dict:
