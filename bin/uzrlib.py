@@ -14,6 +14,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import time
 import unicodedata
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -625,25 +626,32 @@ def _convert_one(src: str) -> str:
     return target
 
 
-def convert_office(settings: Settings, *, dry_run: bool = False) -> dict:
+def convert_office(settings: Settings, published: dict | None = None, *, dry_run: bool = False) -> dict:
     """Ensure every office input has an up-to-date sibling ``<stem>.pdf``.
 
-    Staleness is keyed by the source sha256 recorded in ``.report-convert.json``;
-    an unchanged source with an existing PDF is never reconverted.
+    A conversion is skipped when the sibling PDF already matches: either the
+    local ``.report-convert.json`` records the source sha, or the published
+    manifest pairs this exact source sha with the PDF's current bytes, so a
+    freshly pulled machine never re-runs LibreOffice.
     """
     sources = list_office_sources(settings.master_dir)
     state = load_convert_state(settings)
+    pub = published or {}
     new_state: dict = {}
     converted: dict = {}
     for rel, full in sources:
         sha = sha256_hex(read_stable(full))
         target = os.path.join(os.path.dirname(full) or settings.master_dir, stem_for(full) + ".pdf")
-        up_to_date = state.get(rel) == sha and os.path.exists(target)
-        if not up_to_date and not dry_run:
-            _convert_one(full)
-            converted[rel] = os.path.relpath(target, settings.master_dir)
-        elif not up_to_date:
-            converted[rel] = os.path.relpath(target, settings.master_dir)
+        target_rel = os.path.relpath(target, settings.master_dir)
+        exists = os.path.exists(target)
+        up_to_date = exists and (
+            state.get(rel) == sha
+            or (pub.get(rel) == sha and pub.get(target_rel) == sha256_hex(read_stable(target)))
+        )
+        if not up_to_date:
+            converted[rel] = target_rel
+            if not dry_run:
+                _convert_one(full)
         new_state[rel] = sha
     if not dry_run and new_state != state:
         save_convert_state(settings, new_state)
@@ -683,6 +691,18 @@ def git(repo: str, args: list[str], check: bool = True) -> subprocess.CompletedP
     return proc
 
 
+def git_retry(repo: str, args: list[str], attempts: int = 3) -> subprocess.CompletedProcess:
+    last = ""
+    for i in range(attempts):
+        proc = git(repo, args, check=False)
+        if proc.returncode == 0:
+            return proc
+        last = proc.stderr.decode("utf-8", "replace").strip()
+        if i < attempts - 1:
+            time.sleep(min(2 ** i, 8))
+    raise SyrError(f"git {' '.join(args)} failed after {attempts} attempts: {last}")
+
+
 def is_git_repo(repo: str) -> bool:
     return git(repo, ["rev-parse", "--git-dir"], check=False).returncode == 0
 
@@ -699,7 +719,7 @@ def remote_configured(settings: Settings) -> bool:
 def fetch(settings: Settings) -> None:
     if not remote_configured(settings):
         return
-    git(settings.repo_dir, ["fetch", "--prune", settings.remote])
+    git_retry(settings.repo_dir, ["fetch", "--prune", settings.remote])
 
 
 def ref_exists(settings: Settings, ref: str | None = None) -> bool:
@@ -974,7 +994,12 @@ def sync(settings: Settings, mk: bytes, *, dry_run: bool = False, no_push: bool 
         remote_map = index_reports(read_remote_manifest(settings, mk))
         local_map = index_reports(read_local_manifest(settings, mk))
         baseline = read_baseline(settings)["entries"]
-        conversions = convert_office(settings, dry_run=dry_run)
+        published: dict = {}
+        for entry in local_map.values():
+            published[entry["path"]] = entry.get("sha256")
+        for entry in remote_map.values():
+            published[entry["path"]] = entry.get("sha256")
+        conversions = convert_office(settings, published, dry_run=dry_run)
         snapshot = scan_master(settings)
         titles = load_titles(settings)
         now = now_iso()
@@ -1012,7 +1037,7 @@ def sync(settings: Settings, mk: bytes, *, dry_run: bool = False, no_push: bool 
         changed = commit_all(settings, f"sync: {len(reports)} reports @ {now}")
         pushed = False
         if changed and not no_push and remote_configured(settings):
-            git(settings.repo_dir, ["push", settings.remote, settings.branch])
+            git_retry(settings.repo_dir, ["push", settings.remote, settings.branch])
             pushed = True
         # Baseline records the committed local reality so re-syncs are idempotent.
         write_baseline(settings, [reports[k] for k in sorted(reports)], now)

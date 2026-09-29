@@ -199,7 +199,7 @@ robots.txt      # Disallow: /
 - **v1.1.1**（实现落地）：`rekey` 命令（信封重加密）；`sync` 仅在逻辑内容变化时重写 `manifest.enc`、仅在 `changed` 时 push（幂等，防 cron 空提交）；CSP 增补 `'wasm-unsafe-eval'`（Argon2 WASM 必需）；主仓 `/md` 退役并加 `404.html` 跳转至 `/report/`。
 - **v1.1**：`id` 改 32 hex；blob 名含 rev；CK 随 rev 旋转 + AAD 绑定；SPA 校验 sha256；引入本地基线状态；同步改 fetch + 逻辑合并（弃 git merge manifest）；墓碑 bump rev；`--dry-run` 不动工作树；密码 NFC；Argon2 显式参数；CSP/沙箱/DOMPurify 顺序冻结；PBKDF2 分支字段补全；锁移 `~/.cache`；补残余风险。
 - v1.0：初版。
-- **v1.2.1**：`kind` 改为**由路径推导**（修复陈旧 `kind` 导致 PDF 乱码）；Office **原件也发布**（`kind=office`，供另一台机器 pull/下载后编辑）＋同名转换 PDF；SPA 显示**本地时间**；报告页**顶栏合并为一条**并随滚动收起；office 条目渲染「下载原件 / 查看 PDF 预览」面板。
+- **v1.2.1**：`kind` 改为**由路径推导**（修复陈旧 `kind` 导致 PDF 乱码）；Office **原件也发布**（`kind=office`，供另一台机器 pull/下载后编辑）＋同名转换 PDF；SPA 显示**本地时间**；报告页**顶栏合并为一条**并随滚动收起；office 条目渲染「下载原件 / 查看 PDF 预览」面板；Office 转换幂等扩展到「已发布即跳过」（另一台机器 `pull` 后不再重跑 LibreOffice）；`git fetch/push` 增加网络重试（3 次退避）。
 - **v1.2**（多格式）：`kind` 扩展为 **md/html/pdf/text**；Office（docx/doc/odt/xlsx/pptx…）在发布时由 **LibreOffice 转成 PDF**；`.txt/.csv/...` → text；新增 `report convert`；SPA 用 **pdf.js 内嵌**渲染 PDF、`<pre>` 渲染文本。
 
 ## 12. 多格式契约（v1.2）
