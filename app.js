@@ -34,6 +34,16 @@
     "'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif";
   const DOC_MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 
+  const PDF_DPR_MAX = 2;
+  const KIND_LABELS = { md: "MD", html: "HTML", pdf: "PDF", text: "TXT" };
+
+  // pdf.js renders in the parent document: the sandboxed iframe cannot load
+  // vendor scripts, and Chromium blocks its native PDF plugin under sandbox.
+  if (window.pdfjsLib) {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+      new URL("vendor/pdfjs/pdf.worker.min.js", document.baseURI).href;
+  }
+
   /* ------------------------------------------------------------- DOM nodes */
 
   const el = (id) => document.getElementById(id);
@@ -69,6 +79,11 @@
     reportRetry: el("report-retry"),
     reportExpand: el("report-expand"),
     reportCollapse: el("report-collapse"),
+    pdfView: el("pdf-view"),
+    pdfPages: el("pdf-pages"),
+    pdfPagecount: el("pdf-pagecount"),
+    pdfFit: el("pdf-fit"),
+    pdfOpen: el("pdf-open"),
   };
 
   /* ----------------------------------------------------------------- state */
@@ -86,6 +101,18 @@
   let openToken = 0;
   let manifestBusy = false;
   let autoRetryLeft = 1;
+  let pdfResizeTimer = 0;
+
+  const pdfState = {
+    task: null, // pdfjsLib loading task; destroy() frees the worker and document
+    doc: null,
+    render: null, // the in-flight page render task
+    session: 0, // bumped on teardown so stale async renders stop appending
+    fit: true,
+    width: 0,
+    bytes: null,
+    urls: new Set(),
+  };
 
   /* ---------------------------------------------------------------- errors */
 
@@ -416,9 +443,33 @@
     ].join("\n");
   }
 
+  const TEXT_DOC_CSS = `
+    :root { color-scheme: dark; --bg: #0d1116; --surface: #131820; --line: #232b35; --ink: #e7ecf2; }
+    html { -webkit-text-size-adjust: 100%; }
+    body { margin: 0; padding: 1.25rem; background: var(--bg); }
+    pre {
+      margin: 0; padding: 1rem;
+      border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
+      color: var(--ink); font: 13px/1.65 ${DOC_MONO};
+      white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; tab-size: 4;
+    }
+  `;
+
+  function textDocument(source, entry) {
+    return [
+      "<!doctype html>",
+      '<html lang="zh-CN"><head><meta charset="utf-8">',
+      '<meta name="viewport" content="width=device-width, initial-scale=1">',
+      `<title>${escapeHtml(entry.title || "报告")}</title>`,
+      `<style>${TEXT_DOC_CSS}</style>`,
+      `</head><body><pre>${escapeHtml(source)}</pre></body></html>`,
+    ].join("\n");
+  }
+
   function srcdocFor(entry, plain) {
     if (entry.kind === "md") return markdownDocument(dec(plain), entry);
     if (entry.kind === "html") return dec(plain); // raw, but still confined to the sandbox
+    if (entry.kind === "text") return textDocument(dec(plain), entry);
     fail("format", `不支持的 kind：${entry.kind}`);
   }
 
@@ -468,7 +519,8 @@
   }
 
   function metaLine(entry, withSha = true) {
-    const bits = [String(entry.kind || "").toUpperCase(), `r${entry.rev}`];
+    const kind = String(entry.kind || "");
+    const bits = [KIND_LABELS[kind] || kind.toUpperCase(), `r${entry.rev}`];
     if (Number.isFinite(entry.size)) bits.push(formatSize(entry.size));
     if (entry.updatedAt) bits.push(formatDate(entry.updatedAt));
     if (withSha && typeof entry.sha256 === "string" && entry.sha256) {
@@ -513,8 +565,9 @@
       side.className = "row-side";
 
       const chip = document.createElement("span");
-      chip.className = entry.kind === "md" ? "chip chip-md" : "chip";
-      chip.textContent = String(entry.kind || "?").toUpperCase();
+      const kind = KIND_LABELS[entry.kind] ? entry.kind : "";
+      chip.className = kind ? `chip chip-${kind}` : "chip";
+      chip.textContent = KIND_LABELS[kind] || String(entry.kind || "?").toUpperCase();
 
       const rev = document.createElement("span");
       rev.className = "row-rev";
@@ -580,6 +633,11 @@
     nodes.frame.setAttribute("srcdoc", BLANK_DOC);
   }
 
+  function resetViews() {
+    clearFrame();
+    hidePdf();
+  }
+
   // A reused iframe that was hidden when it first received a document can silently
   // drop later srcdoc navigations (reports paint blank); mount a fresh one instead.
   function mountFrame(doc) {
@@ -603,11 +661,140 @@
 
   function showReportError(message, entry) {
     showReportHead(entry);
-    clearFrame();
+    resetViews();
     nodes.reportLoading.hidden = true;
     nodes.reportErrorMsg.textContent = message;
     nodes.reportError.hidden = false;
     showView("report");
+  }
+
+  /* -------------------------------------------------------------- pdf viewer */
+
+  function revokePdfUrls() {
+    pdfState.urls.forEach((url) => URL.revokeObjectURL(url));
+    pdfState.urls.clear();
+  }
+
+  function destroyPdf() {
+    pdfState.session += 1; // stale paint loops stop on their next page
+    if (pdfState.render) {
+      try { pdfState.render.cancel(); } catch { /* already settled */ }
+      pdfState.render = null;
+    }
+    const task = pdfState.task;
+    pdfState.task = null;
+    pdfState.doc = null;
+    pdfState.width = 0;
+    pdfState.bytes = null;
+    if (task) {
+      try {
+        const done = task.destroy();
+        if (done && typeof done.catch === "function") done.catch(() => {});
+      } catch { /* already destroyed */ }
+    }
+    revokePdfUrls();
+  }
+
+  function hidePdf() {
+    destroyPdf();
+    nodes.pdfView.hidden = true;
+    nodes.pdfPages.textContent = "";
+    nodes.pdfPagecount.textContent = "";
+  }
+
+  function pdfPageWidth() {
+    const styles = getComputedStyle(nodes.pdfPages);
+    const padding = (parseFloat(styles.paddingLeft) || 0) + (parseFloat(styles.paddingRight) || 0);
+    const width = nodes.pdfPages.clientWidth - padding - 2;
+    return width > 40 ? width : 600;
+  }
+
+  async function paintPdf(doc, token, session) {
+    const total = doc.numPages;
+    const dpr = Math.min(window.devicePixelRatio || 1, PDF_DPR_MAX);
+    const host = nodes.pdfPages;
+    host.textContent = "";
+    nodes.pdfPagecount.textContent = total ? `渲染中… 0/${total}` : "空 PDF";
+
+    for (let number = 1; number <= total; number += 1) {
+      if (token !== openToken || session !== pdfState.session) return;
+      const page = await doc.getPage(number);
+      const base = page.getViewport({ scale: 1 });
+      const width = pdfPageWidth();
+      if (pdfState.fit) pdfState.width = width;
+      const viewport = page.getViewport({ scale: pdfState.fit ? width / base.width : 1 });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.floor(viewport.width * dpr));
+      canvas.height = Math.max(1, Math.floor(viewport.height * dpr));
+      canvas.style.width = `${Math.floor(viewport.width)}px`;
+      canvas.style.height = `${Math.floor(viewport.height)}px`;
+
+      const shell = document.createElement("div");
+      shell.className = "pdf-page";
+      shell.appendChild(canvas);
+      host.appendChild(shell);
+
+      const task = page.render({
+        canvasContext: canvas.getContext("2d", { alpha: false }),
+        viewport,
+        transform: dpr === 1 ? null : [dpr, 0, 0, dpr, 0, 0],
+      });
+      pdfState.render = task;
+      try {
+        await task.promise;
+      } finally {
+        if (pdfState.render === task) pdfState.render = null;
+      }
+      if (token !== openToken || session !== pdfState.session) return;
+      nodes.pdfPagecount.textContent = `${number} / ${total} 页`;
+    }
+    nodes.pdfPagecount.textContent = `共 ${total} 页`;
+  }
+
+  async function renderPdf(plain, token) {
+    if (!window.pdfjsLib) fail("internal", "pdf.js 未加载（vendor/pdfjs/pdf.min.js）");
+    const session = pdfState.session;
+    pdfState.bytes = plain; // kept for the "open in new tab" blob URL
+    const data = plain.slice(); // the worker takes ownership of this buffer
+    let task;
+    try {
+      task = window.pdfjsLib.getDocument({ data });
+    } catch (err) {
+      fail("render", `PDF 解析失败：${describe(err)}`);
+    }
+    pdfState.task = task;
+    let doc;
+    try {
+      doc = await task.promise;
+    } catch (err) {
+      if (session === pdfState.session) {
+        pdfState.task = null;
+        pdfState.bytes = null;
+      }
+      fail("render", `PDF 解析失败：${describe(err)}`);
+    }
+    if (token !== openToken || session !== pdfState.session) return;
+    pdfState.doc = doc;
+    await paintPdf(doc, token, session);
+  }
+
+  async function rerenderPdf() {
+    if (!pdfState.doc || nodes.pdfView.hidden) return;
+    const session = pdfState.session;
+    const token = openToken;
+    try {
+      await paintPdf(pdfState.doc, token, session);
+    } catch (err) {
+      if (session === pdfState.session && token === openToken) {
+        showReportError(describe(err), findEntry(state.activeId));
+      }
+    }
+  }
+
+  function maybeRefitPdf() {
+    if (!pdfState.fit || !pdfState.doc || nodes.pdfView.hidden || nodes.report.hidden) return;
+    if (Math.abs(pdfPageWidth() - pdfState.width) >= 8) void rerenderPdf();
   }
 
   async function openReport(id) {
@@ -624,14 +811,23 @@
     }
 
     showReportHead(entry);
+    resetViews();
     nodes.reportError.hidden = true;
     nodes.reportLoading.hidden = false;
-    nodes.frame.hidden = true;
     showView("report");
 
     try {
       const plain = await loadBlob(state.mk, entry);
       if (token !== openToken) return;
+      if (entry.kind === "pdf") {
+        nodes.reportLoading.hidden = true;
+        nodes.pdfView.hidden = false;
+        nodes.pdfPagecount.textContent = "加载中…";
+        await renderPdf(plain, token);
+        if (token !== openToken) return;
+        nodes.reportTitle.focus({ preventScroll: true });
+        return;
+      }
       mountFrame(srcdocFor(entry, plain));
       nodes.reportLoading.hidden = true;
       nodes.reportTitle.focus({ preventScroll: true });
@@ -657,11 +853,11 @@
     if (!id) {
       state.activeId = null;
       openToken += 1;
-      clearFrame();
+      resetViews();
       showView("list");
       return;
     }
-    if (id === state.activeId && !nodes.frame.hidden) return;
+    if (id === state.activeId && (!nodes.frame.hidden || !nodes.pdfView.hidden)) return;
     void openReport(id);
   }
 
@@ -678,6 +874,7 @@
   function setImmerse(on) {
     document.documentElement.classList.toggle("immerse", on);
     nodes.reportCollapse.hidden = !on;
+    maybeRefitPdf();
   }
 
   function setGateError(message) {
@@ -726,7 +923,7 @@
     }
     autoRetryLeft = 1;
     nodes.lockBtn.hidden = true;
-    clearFrame();
+    resetViews();
   }
 
   function readCachedMk() {
@@ -932,6 +1129,19 @@
       if (event.key === "Escape") setImmerse(false);
     });
 
+    nodes.pdfFit.addEventListener("click", () => {
+      pdfState.fit = !pdfState.fit;
+      nodes.pdfFit.setAttribute("aria-pressed", pdfState.fit ? "true" : "false");
+      void rerenderPdf();
+    });
+
+    nodes.pdfOpen.addEventListener("click", () => {
+      if (!pdfState.bytes) return;
+      const url = URL.createObjectURL(new Blob([pdfState.bytes], { type: "application/pdf" }));
+      pdfState.urls.add(url);
+      window.open(url, "_blank", "noopener");
+    });
+
     nodes.listBannerRetry.addEventListener("click", retryManifest);
 
     window.addEventListener("hashchange", applyRoute);
@@ -942,6 +1152,11 @@
       if (y > lastScrollY + 6 && y > 48) nodes.topbar.classList.add("is-hidden");
       else if (y < lastScrollY - 6) nodes.topbar.classList.remove("is-hidden");
       lastScrollY = y;
+    }, { passive: true });
+
+    window.addEventListener("resize", () => {
+      window.clearTimeout(pdfResizeTimer);
+      pdfResizeTimer = window.setTimeout(maybeRefitPdf, 200);
     }, { passive: true });
 
     const refresh = () => void refreshManifest();

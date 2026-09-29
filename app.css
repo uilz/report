@@ -33,6 +33,7 @@
   --ok:           #1e7a4d;
   --focus:        #2f6fd0;
   --frame-bg:     #ffffff;
+  --paper:        #ffffff;
   --scrim:        rgba(33, 28, 21, .38);
   --bg-scrim:     rgba(247, 245, 241, .85);
   --sweep:        rgba(33, 28, 21, .05);
@@ -537,6 +538,7 @@ button, input { font: inherit; color: inherit; }
 .row-side { flex: none; display: flex; align-items: center; gap: var(--s2); }
 
 .chip {
+  flex: none;
   padding: 0.1rem var(--s2);
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
@@ -545,9 +547,24 @@ button, input { font: inherit; color: inherit; }
   font-size: var(--text-xs);
   letter-spacing: var(--tracking-wide);
   color: var(--ink-dim);
+  white-space: nowrap;
 }
 
 .chip-md { color: var(--brass); border-color: var(--brass-18); background: var(--brass-08); }
+
+.chip-html {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 32%, transparent);
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+}
+
+.chip-pdf {
+  color: var(--focus);
+  border-color: color-mix(in srgb, var(--focus) 32%, transparent);
+  background: color-mix(in srgb, var(--focus) 10%, transparent);
+}
+
+.chip-text { color: var(--ink-faint); }
 
 .row-rev {
   font-family: var(--font-mono);
@@ -672,6 +689,78 @@ button, input { font: inherit; color: inherit; }
   box-shadow: var(--shadow-card);
 }
 
+/* inline pdf.js viewer (parent document: the sandboxed iframe cannot load
+   vendor scripts nor Chromium's native PDF plugin) */
+
+.pdf-view {
+  flex: 1;
+  min-height: 22rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.pdf-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.pdf-pagecount {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+}
+
+.pdf-btn { flex: none; min-height: 1.9rem; padding: 0 var(--s3); font-size: var(--text-xs); }
+.pdf-btn svg { width: 0.9rem; height: 0.9rem; }
+
+.pdf-btn[aria-pressed="true"] {
+  color: var(--brass);
+  border-color: var(--brass-18);
+  background: var(--brass-08);
+}
+
+/* size containment: a scroll container must not feed its content height back
+   into the auto-height flex chain, or the whole document grows instead of
+   #pdf-pages scrolling internally */
+.pdf-pages {
+  flex: 1;
+  min-height: 0;
+  contain: size;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s4);
+  padding: var(--s4);
+  background: var(--bg-soft);
+  overscroll-behavior: contain;
+}
+
+.pdf-page {
+  flex: none;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.pdf-page canvas { display: block; max-width: 100%; height: auto; }
+
 .report-overlay,
 .report-error {
   flex: 1;
@@ -776,7 +865,11 @@ button, input { font: inherit; color: inherit; }
 
   .gate-card { padding: var(--s5) var(--s4) var(--s4); }
 
-  .report-stage, .report-frame, .report-overlay, .report-error { min-height: 16rem; }
+  .report-stage, .report-frame, .pdf-view, .report-overlay, .report-error { min-height: 16rem; }
+  .row-side { gap: var(--s1); }
+  .chip { padding: 0.1rem var(--s1); letter-spacing: 0.04em; }
+  .pdf-toolbar { padding: var(--s2); }
+  .pdf-pages { padding: var(--s2); gap: var(--s3); }
   .report-head { gap: var(--s2); }
   .report-title { font-size: var(--text-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .report-head .zoom-btn { padding: 0 0.7rem; }
@@ -838,10 +931,26 @@ html.immerse .report-frame {
   box-shadow: none;
 }
 
+html.immerse .pdf-view {
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* keep the floating 缩小 button clear of the viewer's toolbar buttons */
+html.immerse .pdf-toolbar { padding-right: calc(6.5rem + env(safe-area-inset-right)); }
+
 html.viewing-report .foot { display: none; }
 html.viewing-report .stage { padding-bottom: 0; }
 
 html.viewing-report .report-frame {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+html.viewing-report .pdf-view {
   border: 0;
   border-radius: 0;
   box-shadow: none;
