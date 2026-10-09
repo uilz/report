@@ -962,6 +962,7 @@
   function setImmerse(on) {
     document.documentElement.classList.toggle("immerse", on);
     nodes.reportCollapse.hidden = !on;
+    nodes.reportCollapse.classList.remove("is-shown");
     maybeRefitPdf();
   }
 
@@ -1213,6 +1214,19 @@
 
     nodes.reportExpand.addEventListener("click", () => setImmerse(true));
     nodes.reportCollapse.addEventListener("click", () => setImmerse(false));
+
+    let collapseShowTimer = 0;
+    let collapseHideTimer = 0;
+    nodes.reportCollapse.addEventListener("mouseenter", () => {
+      window.clearTimeout(collapseShowTimer);
+      window.clearTimeout(collapseHideTimer);
+      collapseShowTimer = window.setTimeout(() => nodes.reportCollapse.classList.add("is-shown"), 3000);
+    });
+    nodes.reportCollapse.addEventListener("mouseleave", () => {
+      window.clearTimeout(collapseShowTimer);
+      window.clearTimeout(collapseHideTimer);
+      collapseHideTimer = window.setTimeout(() => nodes.reportCollapse.classList.remove("is-shown"), 1000);
+    });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") setImmerse(false);
     });

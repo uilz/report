@@ -909,7 +909,23 @@ button, input { font: inherit; color: inherit; }
   box-shadow: var(--shadow-card);
 }
 
-html.immerse .zoom-collapse { display: inline-flex; }
+html.immerse .zoom-collapse {
+  display: inline-flex;
+  opacity: 0;
+  transition: opacity 200ms var(--ease);
+}
+
+html.immerse .zoom-collapse::before {
+  content: "";
+  position: absolute;
+  inset: -22px;
+}
+
+html.immerse .zoom-collapse.is-shown { opacity: 1; }
+
+@media (hover: none) {
+  html.immerse .zoom-collapse { opacity: 1; }
+}
 
 html.immerse .topbar,
 html.immerse .foot,
