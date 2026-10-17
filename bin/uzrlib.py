@@ -104,6 +104,8 @@ OFFICE_EXTS = frozenset(
     {".docx", ".doc", ".odt", ".rtf", ".xlsx", ".xls", ".ods", ".pptx", ".ppt", ".odp"}
 )
 
+SCRIPT_EXTS = frozenset({".sh", ".bash", ".zsh"})
+
 
 def kind_for(path: str) -> str:
     base = re.sub(r"\.conflict-[0-9a-f]{8}-\d+$", "", path)
@@ -521,7 +523,9 @@ def _is_ignored(rel: str) -> bool:
     if any(p.startswith(".") for p in parts):
         return True
     base = os.path.basename(rel)
-    return base in (STATE_NAME, META_NAME)
+    if base in (STATE_NAME, META_NAME):
+        return True
+    return os.path.splitext(base)[1].lower() in SCRIPT_EXTS
 
 
 def scan_master(settings: Settings) -> dict:
