@@ -105,6 +105,7 @@ OFFICE_EXTS = frozenset(
 )
 
 SCRIPT_EXTS = frozenset({".sh", ".bash", ".zsh"})
+JUNK_NAMES = frozenset({"desktop.ini", "thumbs.db"})
 
 
 def kind_for(path: str) -> str:
@@ -523,7 +524,8 @@ def _is_ignored(rel: str) -> bool:
     if any(p.startswith(".") for p in parts):
         return True
     base = os.path.basename(rel)
-    if base in (STATE_NAME, META_NAME):
+    low = base.lower()
+    if base in (STATE_NAME, META_NAME) or low in JUNK_NAMES or "zone.identifier" in low:
         return True
     return os.path.splitext(base)[1].lower() in SCRIPT_EXTS
 
