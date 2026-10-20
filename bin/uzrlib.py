@@ -993,11 +993,19 @@ def _prepare_repo(settings: Settings) -> None:
         raise SyrError("working tree is dirty; commit or stash before syncing")
 
 
-def sync(settings: Settings, mk: bytes, *, dry_run: bool = False, no_push: bool = False) -> dict:
+def sync(
+    settings: Settings,
+    mk: bytes,
+    *,
+    dry_run: bool = False,
+    no_push: bool = False,
+    local_only: bool = False,
+) -> dict:
     with sync_lock(settings):
         _prepare_repo(settings)
-        fetch(settings)
-        remote_map = index_reports(read_remote_manifest(settings, mk))
+        if not local_only:
+            fetch(settings)
+        remote_map = {} if local_only else index_reports(read_remote_manifest(settings, mk))
         local_map = index_reports(read_local_manifest(settings, mk))
         baseline = read_baseline(settings)["entries"]
         published: dict = {}
@@ -1026,10 +1034,11 @@ def sync(settings: Settings, mk: bytes, *, dry_run: bool = False, no_push: bool 
 
         apply_plan(settings, mk, reports, ops)
 
-        tip = rev_parse(settings, settings.remote_ref) if ref_exists(settings) else None
-        head = rev_parse(settings, "HEAD")
-        if tip and tip != head:
-            reset_hard(settings, tip)
+        if not local_only:
+            tip = rev_parse(settings, settings.remote_ref) if ref_exists(settings) else None
+            head = rev_parse(settings, "HEAD")
+            if tip and tip != head:
+                reset_hard(settings, tip)
 
         ensure_blobs(settings, mk, reports)
         # Idempotency: only rewrite manifest.enc when the logical content changed;
@@ -1042,9 +1051,24 @@ def sync(settings: Settings, mk: bytes, *, dry_run: bool = False, no_push: bool 
             save_manifest(settings, mk, reports, now)
         changed = commit_all(settings, f"sync: {len(reports)} reports @ {now}")
         pushed = False
-        if changed and not no_push and remote_configured(settings):
-            git_retry(settings.repo_dir, ["push", settings.remote, settings.branch])
-            pushed = True
+        if not local_only and not no_push and remote_configured(settings):
+            if ref_exists(settings):
+                ahead = 0
+                count = git(
+                    settings.repo_dir,
+                    ["rev-list", "--count", f"{settings.remote_ref}..HEAD"],
+                    check=False,
+                )
+                if count.returncode == 0:
+                    try:
+                        ahead = int(count.stdout.decode().strip() or 0)
+                    except ValueError:
+                        ahead = 0
+            else:
+                ahead = 1 if rev_parse(settings, "HEAD") else 0
+            if changed or ahead > 0:
+                git_retry(settings.repo_dir, ["push", settings.remote, settings.branch])
+                pushed = True
         # Baseline records the committed local reality so re-syncs are idempotent.
         write_baseline(settings, [reports[k] for k in sorted(reports)], now)
         return {

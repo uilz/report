@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """uilz-report CLI (SPEC.md v1.1 §5).
 
-Commands: init, add, sync, pull, status, unlock-mk, rekey, convert.
+Commands: init, add, sync, pull, status, unlock-mk, rekey, convert,
+publish, list, health. Platform contract: 0.1 (see PLATFORM.md).
 """
 from __future__ import annotations
 
@@ -18,6 +19,246 @@ import uzrlib as U  # noqa: E402
 
 def _print(msg: str = "") -> None:
     print(msg)
+
+
+TOOL_VERSION = "0.2.0"
+CONTRACT_VERSION = "0.1"
+DEFAULT_MAX_BYTES = 10 * 1024 * 1024
+PUB_PREFIX = "pub_"
+VALIDATION_CODES = frozenset({"FILE_NOT_FOUND", "INVALID_INPUT"})
+
+
+class ContractError(Exception):
+    def __init__(self, code: str, message: str, retryable: bool) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+
+
+def _json_stdout(payload: dict) -> None:
+    import json
+
+    print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+
+
+def _emit_ok(result) -> int:
+    _json_stdout(
+        {
+            "ok": True,
+            "tool_version": TOOL_VERSION,
+            "contract_version": CONTRACT_VERSION,
+            "result": result,
+        }
+    )
+    return 0
+
+
+def _emit_err(code: str, message: str, retryable: bool, extra: dict | None = None) -> int:
+    payload = {
+        "ok": False,
+        "tool_version": TOOL_VERSION,
+        "contract_version": CONTRACT_VERSION,
+        "code": code,
+        "message": message,
+        "retryable": bool(retryable),
+    }
+    if extra:
+        payload.update(extra)
+    _json_stdout(payload)
+    return 2 if code in VALIDATION_CODES else 1
+
+
+def _classify(exc: Exception) -> tuple[str, bool]:
+    low = str(exc).lower()
+    if "not found" in low or "no such file" in low or "not a file" in low:
+        return "FILE_NOT_FOUND", False
+    if "no machine key" in low or "wrong password" in low or "not a git repository" in low:
+        return "VAULT_UNAVAILABLE", True
+    if "git " in low or "push" in low or "fetch" in low or "conflict" in low or "remote" in low:
+        return "SYNC_FAILED", True
+    return "UNKNOWN", False
+
+
+def _writable_dir(path: str) -> bool:
+    if os.path.isdir(path):
+        return os.access(path, os.W_OK)
+    parent = os.path.dirname(path.rstrip(os.sep)) or "."
+    return os.path.isdir(parent) and os.access(parent, os.W_OK)
+
+
+def _remote_reachable(settings: U.Settings) -> bool:
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            ["git", "-C", settings.repo_dir, "ls-remote", settings.remote, settings.branch],
+            capture_output=True,
+            timeout=8,
+        )
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
+def _git_ahead(settings: U.Settings) -> tuple[str | None, str | None, int]:
+    if not U.is_git_repo(settings.repo_dir):
+        return None, None, 0
+    head = U.rev_parse(settings, "HEAD")
+    origin = U.rev_parse(settings, settings.remote_ref) if U.ref_exists(settings) else None
+    ahead = 0
+    if head and origin:
+        proc = U.git(
+            settings.repo_dir,
+            ["rev-list", "--count", f"{settings.remote_ref}..HEAD"],
+            check=False,
+        )
+        if proc.returncode == 0:
+            try:
+                ahead = int(proc.stdout.decode().strip() or 0)
+            except ValueError:
+                ahead = 0
+    elif head and not origin:
+        ahead = 1
+    return head, origin, ahead
+
+
+def _last_sync_path(settings: U.Settings) -> str:
+    return os.path.join(os.path.dirname(settings.mk_path), "last-sync.json")
+
+
+def _write_last_sync(settings: U.Settings, ok: bool, message: str | None = None) -> None:
+    import json
+    import time
+
+    path = _last_sync_path(settings)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"ok": ok, "at": int(time.time()), "message": message}, fh)
+            fh.write("\n")
+    except OSError:
+        pass
+
+
+def _last_sync_failed(settings: U.Settings) -> bool:
+    import json
+
+    try:
+        with open(_last_sync_path(settings), encoding="utf-8") as fh:
+            return json.load(fh).get("ok") is False
+    except (OSError, ValueError):
+        return False
+
+
+def _entry_state(settings: U.Settings, entry: dict) -> str:
+    if entry.get("deleted"):
+        return "deleted"
+    _, _, ahead = _git_ahead(settings)
+    if ahead > 0:
+        return "failed" if _last_sync_failed(settings) else "pending"
+    return "published"
+
+
+def _entry_payload(settings: U.Settings, entry: dict) -> dict:
+    return {
+        "publish_id": PUB_PREFIX + str(entry.get("id")),
+        "file": os.path.basename(str(entry.get("path") or "")),
+        "version": entry.get("rev"),
+        "status": _entry_state(settings, entry),
+        "sha256": entry.get("sha256"),
+        "published_at": entry.get("updatedAt"),
+    }
+
+
+def cmd_publish(args, settings: U.Settings) -> int:
+    src = os.path.abspath(args.file)
+    if not os.path.isfile(src):
+        raise ContractError("FILE_NOT_FOUND", f"file not found: {src}", False)
+    size = os.path.getsize(src)
+    if args.max_bytes and size > args.max_bytes:
+        raise ContractError(
+            "INVALID_INPUT", f"file size {size} exceeds max {args.max_bytes} bytes", False
+        )
+    if not _writable_dir(settings.repo_dir) or not _writable_dir(settings.master_dir):
+        raise ContractError("VAULT_UNAVAILABLE", "vault or master dir is not writable", True)
+    try:
+        mk = U.load_mk(settings)
+    except U.SyrError as exc:
+        raise ContractError("VAULT_UNAVAILABLE", str(exc), True) from exc
+
+    with open(src, "rb") as fh:
+        data = fh.read()
+    name = os.path.basename(src)
+    os.makedirs(settings.master_dir, exist_ok=True)
+    dest = os.path.join(settings.master_dir, name)
+    tmp = dest + ".uzr-publish.tmp"
+    with open(tmp, "wb") as fh:
+        fh.write(data)
+    os.replace(tmp, dest)
+    if args.title:
+        U.save_title(settings, name, args.title)
+
+    try:
+        U.sync(settings, mk, no_push=not args.sync, local_only=not args.sync)
+    except U.SyrError as exc:
+        _write_last_sync(settings, False, str(exc))
+        raise ContractError("SYNC_FAILED", str(exc), True) from exc
+    _write_last_sync(settings, True)
+
+    manifest = U.read_local_manifest(settings, mk)
+    entry = next(
+        (
+            item
+            for item in manifest.get("reports", [])
+            if item.get("path") == name and not item.get("deleted")
+        ),
+        None,
+    )
+    if entry is None:
+        raise ContractError(
+            "INVALID_INPUT",
+            "file is ignored by the vault (script/junk) or otherwise not publishable",
+            False,
+        )
+    return _emit_ok(_entry_payload(settings, entry))
+
+
+def cmd_list(args, settings: U.Settings) -> int:
+    try:
+        mk = U.load_mk(settings)
+    except U.SyrError as exc:
+        raise ContractError("VAULT_UNAVAILABLE", str(exc), True) from exc
+    manifest = U.read_local_manifest(settings, mk)
+    items = [
+        _entry_payload(settings, entry)
+        for entry in manifest.get("reports", [])
+        if not entry.get("deleted")
+    ]
+    items.sort(key=lambda item: str(item.get("published_at") or ""), reverse=True)
+    return _emit_ok({"items": items})
+
+
+def cmd_health(args, settings: U.Settings) -> int:
+    result = {
+        "vault_writable": _writable_dir(settings.repo_dir),
+        "master_writable": _writable_dir(settings.master_dir),
+        "mk_present": os.path.isfile(settings.mk_path),
+        "git_repo": U.is_git_repo(settings.repo_dir),
+    }
+    result["remote_configured"] = bool(result["git_repo"] and U.remote_configured(settings))
+    result["remote_reachable"] = (
+        _remote_reachable(settings) if result["remote_configured"] else False
+    )
+    _, _, ahead = _git_ahead(settings)
+    result["pending"] = ahead
+    result["last_sync_at"] = (U.read_baseline(settings) or {}).get("lastSync")
+    ok = all(
+        [result["vault_writable"], result["master_writable"], result["mk_present"], result["git_repo"]]
+    )
+    if ok:
+        return _emit_ok(result)
+    return _emit_err("VAULT_UNAVAILABLE", "vault is not usable", True, {"result": result})
 
 
 def _get_password(confirm: bool) -> str:
@@ -169,6 +410,15 @@ def cmd_pull(args, settings: U.Settings) -> int:
 
 def cmd_status(args, settings: U.Settings) -> int:
     mk = U.load_mk(settings)
+    publish_id = getattr(args, "id", None)
+    if publish_id:
+        rid = publish_id[len(PUB_PREFIX):] if publish_id.startswith(PUB_PREFIX) else publish_id
+        entry = U.index_reports(U.read_local_manifest(settings, mk)).get(rid)
+        if entry is None:
+            raise ContractError("FILE_NOT_FOUND", f"no such publish_id: {publish_id}", False)
+        return _emit_ok(_entry_payload(settings, entry))
+    if getattr(args, "json", False):
+        return cmd_list(args, settings)
     _print(U.status(settings, mk))
     return 0
 
@@ -266,8 +516,28 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_convert)
 
-    p = sub.add_parser("status", parents=[common], help="show local/remote/baseline differences")
+    p = sub.add_parser("status", parents=[common], help="show status; --id for one publish")
+    p.add_argument("--id")
+    p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("publish", parents=[common], help="publish a file (default: pending, no push)")
+    p.add_argument("--file", required=True)
+    p.add_argument("--title")
+    p.add_argument("--max-bytes", dest="max_bytes", type=int, default=DEFAULT_MAX_BYTES)
+    sync_group = p.add_mutually_exclusive_group()
+    sync_group.add_argument("--sync", action="store_true", help="also push to the remote (opt-in)")
+    sync_group.add_argument("--no-sync", dest="no_sync", action="store_true", help="do not push (default)")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_publish)
+
+    p = sub.add_parser("list", parents=[common], help="list published items (includes pending)")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_list)
+
+    p = sub.add_parser("health", parents=[common], help="vault/sync health")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_health)
 
     p = sub.add_parser("unlock-mk", parents=[common], help="export base64 MK to a file")
     p.add_argument("--out", required=True)
@@ -281,7 +551,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _json_mode(args) -> bool:
+    if getattr(args, "json", False):
+        return True
+    func = getattr(args, "func", None)
+    if func in (cmd_publish, cmd_list, cmd_health):
+        return True
+    return func is cmd_status and getattr(args, "id", None) is not None
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if "--version" in argv:
+        _json_stdout({"tool_version": TOOL_VERSION, "contract_version": CONTRACT_VERSION})
+        return 0
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
@@ -294,12 +577,24 @@ def main(argv: list[str] | None = None) -> int:
             mk_file=args.mk_file,
         )
         return args.func(args, settings)
+    except ContractError as exc:
+        if _json_mode(args):
+            return _emit_err(exc.code, exc.message, exc.retryable)
+        print(f"error: {exc.message}", file=sys.stderr)
+        return 2 if exc.code in VALIDATION_CODES else 1
     except U.SyrError as exc:
-        _print(f"error: {exc}")
-        return 1
+        code, retryable = _classify(exc)
+        if _json_mode(args):
+            return _emit_err(code, str(exc), retryable)
+        print(f"error: {exc}", file=sys.stderr)
+        return 2 if code in VALIDATION_CODES else 1
     except KeyboardInterrupt:
-        _print("interrupted")
+        print("interrupted", file=sys.stderr)
         return 130
+    except Exception as exc:
+        if _json_mode(args):
+            return _emit_err("UNKNOWN", str(exc), False)
+        raise
 
 
 if __name__ == "__main__":

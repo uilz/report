@@ -25,6 +25,22 @@ python3 bin/report unlock-mk --out ~/mk   # 导出主密钥（恢复凭据）
 
 机器密钥：`~/.config/uilz-report/mk.key`（chmod 600，**绝不在本仓库内**）。
 
+## 平台接入（contract 0.1）
+
+供个人助手平台（MCP 包装）调用的稳定 CLI 界面，详见 **[PLATFORM.md](PLATFORM.md)**：
+
+```bash
+report --version
+report health --json
+report publish --file <path> --no-sync --json   # 默认不推送 -> pending
+report status --id <publish_id> --json
+report list --json
+```
+
+- `publish` 默认 `--no-sync`（只加密入库，`status=pending`）；`--sync` 才推送。
+- stdout 只输出单行 JSON；退出码 `0/2/1`；错误码固定 + `retryable`。
+- 单文件默认上限 10 MB（超限 `INVALID_INPUT`）。
+
 ## 安全边界
 
 - 仓库是**公开**的：密文可被任何人下载并离线爆破，安全性 = **密码强度**。
