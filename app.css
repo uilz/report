@@ -872,7 +872,7 @@ button, input { font: inherit; color: inherit; }
   .pdf-toolbar { padding: var(--s2); }
   .pdf-pages { padding: var(--s2); gap: var(--s3); }
   .report-head { gap: var(--s2); }
-  html.viewing-report .report-head { margin: 0 calc(-1 * var(--s3)) var(--s4); padding: var(--s2) var(--s3); }
+  html.viewing-report .report-head { padding: calc(var(--s2) + env(safe-area-inset-top)) max(var(--s3), env(safe-area-inset-right)) var(--s2) max(var(--s3), env(safe-area-inset-left)); }
   .report-title { font-size: var(--text-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .report-head .zoom-btn { padding: 0 0.7rem; }
   .report-head .zoom-btn span { display: none; }
@@ -971,26 +971,21 @@ html.viewing-report .report-frame {
 html.viewing-report .topbar { display: none; }
 
 html.viewing-report .report-head {
-  z-index: 10;
-  max-height: 9rem;
-  overflow: hidden;
-  margin: 0 calc(-1 * var(--s4)) var(--s4);
-  padding: var(--s3) var(--s4);
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  padding: calc(var(--s3) + env(safe-area-inset-top)) max(var(--s4), env(safe-area-inset-right)) var(--s3) max(var(--s4), env(safe-area-inset-left));
   background: var(--bg-scrim);
   backdrop-filter: saturate(1.2) blur(10px);
   -webkit-backdrop-filter: saturate(1.2) blur(10px);
   border-bottom: 1px solid var(--line);
-  transition: max-height 200ms var(--ease), padding 200ms var(--ease), margin 200ms var(--ease), border-color 200ms var(--ease), opacity 150ms var(--ease);
+  transform: translateY(0);
+  transition: transform 200ms var(--ease);
 }
 
-html.viewing-report .report-head.is-hidden {
-  max-height: 0;
-  margin-bottom: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-  border-bottom-color: transparent;
-  opacity: 0;
-}
+html.viewing-report .report-head.is-hidden { transform: translateY(-100%); }
 
 .office-view {
   flex: 1;
