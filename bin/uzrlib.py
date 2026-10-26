@@ -881,6 +881,8 @@ def plan_merge(
             else:
                 reports[rid] = re_
                 ops.append(("materialize", rid, rrev, path))
+        elif bdel and lsha is not None:
+            reports[rid] = entry_from_meta(rid, path, meta, int(brev) + 1, lsha, lsize, now)
         elif local_changed:
             reports[rid] = entry_from_meta(rid, path, meta, int(brev) + 1, lsha, lsize, now)
         elif local_deleted:
